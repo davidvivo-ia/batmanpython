@@ -36,11 +36,13 @@ class SaveData:
     unlocked: list[str] = field(default_factory=list)
 
     def push_score(self, score: int) -> bool:
-        """Insert score, keep top 5. Returns True if it made the table."""
+        """Insert score, keep top 5. Returns True if THIS submission made the table."""
+        before = list(self.high_scores)
         self.high_scores.append(score)
         self.high_scores.sort(reverse=True)
         del self.high_scores[5:]
-        return score in self.high_scores[:5]
+        # Made the table iff the table changed (or if the table is shorter than 5).
+        return self.high_scores != before
 
 
 def load() -> SaveData:

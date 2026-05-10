@@ -118,6 +118,8 @@ _volume = 0.6
 
 def play_stage(stage_idx: int) -> None:
     global _channel
+    if not pygame.mixer.get_init():
+        return
     if _channel is None:
         _channel = pygame.mixer.Channel(7)  # reserve a high-numbered channel
     _channel.stop()
@@ -127,13 +129,17 @@ def play_stage(stage_idx: int) -> None:
 
 
 def stop() -> None:
-    if _channel is not None:
+    if _channel is not None and pygame.mixer.get_init():
         _channel.stop()
 
 
 def set_volume(v: float) -> None:
     global _volume
     _volume = max(0.0, min(1.0, v))
-    if _channel is not None:
-        for snd in (_track(0), _track(1), _track(2)):
-            snd.set_volume(_volume)
+    # Push the new volume only to the actively-playing channel to avoid
+    # synthesising tracks that haven't been requested yet.
+    if _channel is not None and pygame.mixer.get_init():
+        try:
+            _channel.set_volume(_volume)
+        except pygame.error:
+            pass

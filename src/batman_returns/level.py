@@ -101,10 +101,12 @@ class Level:
     platforms: list[Platform] = field(default_factory=list)
     lightning_flash: int = 0  # frames remaining
     lightning_cooldown: int = 240
+    rng: random.Random = field(default_factory=lambda: random.Random(0xBA7))
 
     def __post_init__(self) -> None:
         self.width_px = self.stage.length_tiles * TILE_SIZE
-        rng = random.Random(hash(self.stage.name))
+        self.rng = random.Random(hash(self.stage.name))
+        rng = self.rng
         # Procedural skyline silhouettes (mid parallax)
         x = 0
         while x < self.width_px * 1.5:
@@ -164,7 +166,7 @@ class Level:
             r[1] += r[2]
             if r[1] > NATIVE_H:
                 r[1] = -4
-                r[0] = random.uniform(0, NATIVE_W)
+                r[0] = self.rng.uniform(0, NATIVE_W)
             if r[0] < 0:
                 r[0] = NATIVE_W
         # Lightning
@@ -174,10 +176,11 @@ class Level:
             else:
                 self.lightning_cooldown -= 1
                 if self.lightning_cooldown <= 0:
-                    self.lightning_flash = random.randint(4, 10)
-                    self.lightning_cooldown = random.randint(180, 480)
-                    from . import audio
-                    audio.thunder().play()
+                    self.lightning_flash = self.rng.randint(4, 10)
+                    self.lightning_cooldown = self.rng.randint(180, 480)
+                    if pygame.mixer.get_init():
+                        from . import audio
+                        audio.thunder().play()
 
     # ------------------------------------------------------------------
     def draw(self, surf: pygame.Surface) -> None:
@@ -244,13 +247,27 @@ class Level:
     def world_to_screen(self, x: float) -> int:
         return int(x - self.cam_x)
 
-    def platform_top_below(self, x: float, foot_y: float, prev_foot_y: float) -> int | None:
-        """If foot crosses a platform top while falling, return its y. Else None."""
+    def platform_top_below(
+        self,
+        x: float,
+        foot_y: float,
+        prev_foot_y: float,
+        half_width: float = 6.0,
+    ) -> int | None:
+        """If the player's foot crosses a platform top while falling, return its y.
+
+        Uses the player's bounding box (``x ± half_width``) rather than a single
+        center point — otherwise a player whose body is mostly off the platform
+        could snap onto it as long as the center column was above.
+        """
         if foot_y < prev_foot_y:
             return None
+        left = x - half_width
+        right = x + half_width
         for plat in self.platforms:
-            if plat.x <= x <= plat.x + plat.w:
-                top = plat.y
-                if prev_foot_y <= top <= foot_y:
-                    return top
+            if right < plat.x or left > plat.x + plat.w:
+                continue
+            top = plat.y
+            if prev_foot_y <= top <= foot_y:
+                return top
         return None

@@ -97,17 +97,24 @@ def _spawn_for_stage(world: World) -> None:
         audio.boss_roar().play()
         world.floats.emit("THE PENGUIN!", world.player.x, world.player.y - 30, PALETTE["red"])
 
-    # Midboss spawn
+    # Midboss spawn — pin to a fixed world position (not relative to player)
+    # so a player who runs through the trigger zone doesn't shove the midboss
+    # off-stage; also pause mook spawning during the midboss fight.
     if (
         stage.midboss_kind
         and not world.midboss_spawned
         and world.player.x > stage.midboss_at_tile * TILE_SIZE
     ):
         kind = EnemyKind(stage.midboss_kind)
-        boss_x = world.player.x + 100
-        world.enemies.append(Enemy.spawn(kind, boss_x, GROUND_Y - 28))
+        boss_world_x = (stage.midboss_at_tile + 8) * TILE_SIZE
+        boss_world_x = min(boss_world_x, stage.length_tiles * TILE_SIZE - 32)
+        world.enemies.append(Enemy.spawn(kind, boss_world_x, GROUND_Y - 28))
         world.midboss_spawned = True
-        audio.boss_roar().play()
+        # Skip the spawn cursor past the midboss arena so we don't dump mooks
+        # on top of the boss fight.
+        world.spawn_index = max(world.spawn_index, stage.midboss_at_tile + 16)
+        if pygame.mixer.get_init():
+            audio.boss_roar().play()
         label = {"midboss_joker": "THE JOKER!", "midboss_catwoman": "CATWOMAN!"}[stage.midboss_kind]
         world.floats.emit(label, world.player.x, world.player.y - 30, PALETTE["magenta"])
 
@@ -135,12 +142,15 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
 
     _spawn_for_stage(world)
 
-    # Update enemies
+    # Update enemies. Cap projectile pool defensively (Penguin phase 3 with
+    # extreme cadence shouldn't be able to OOM the screen).
+    MAX_ENEMY_SHOTS = 64
     for e in world.enemies:
         if not e.alive:
             continue
         for proj in e.update(p, world.level):
-            world.enemy_shots.append(proj)
+            if len(world.enemy_shots) < MAX_ENEMY_SHOTS:
+                world.enemy_shots.append(proj)
 
     # Update projectiles
     for b in world.batarangs:
@@ -212,18 +222,21 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
                 b.alive = False
                 break
 
-    # Enemies vs player (contact + projectiles)
-    for e in world.enemies:
-        if e.alive and e.hitbox.intersects(p.hitbox) and p.iframes <= 0:
-            p.take_damage(e.contact_damage)
-            world.particles.burst_blood(p.x, p.y + 8, dir_sign=-p.facing)
-            world.shake.kick(4.0)
+    # Enemies vs player (contact + projectiles).
+    # Only one damage event per frame; iframes are still respected by take_damage.
+    if p.iframes <= 0:
+        for e in world.enemies:
+            if e.alive and e.hitbox.intersects(p.hitbox):
+                p.take_damage(e.contact_damage)
+                world.particles.burst_blood(p.x, p.y + 8, dir_sign=-p.facing)
+                world.shake.kick(4.0)
+                break
     for s in world.enemy_shots:
         if s.alive and s.hitbox.intersects(p.hitbox):
-            world.particles.spark(p.x, p.y + 10, PALETTE["red"])
             if p.iframes <= 0:
+                world.particles.spark(p.x, p.y + 10, PALETTE["red"])
                 world.shake.kick(3.0)
-            p.take_damage(s.damage)
+                p.take_damage(s.damage)
             s.alive = False
 
     # Pickups
@@ -541,8 +554,11 @@ class Game:
                         self.advance_stage()
                         if self.state is GameState.VICTORY:
                             self._record_score()
+                            music.stop()
                 else:
-                    if w.player.x >= w.level.width_px - NATIVE_W // 2:
+                    midboss_required = w.level.stage.midboss_kind is not None
+                    midboss_done = w.midboss_defeated or not midboss_required
+                    if midboss_done and w.player.x >= w.level.width_px - NATIVE_W // 2:
                         self.advance_stage()
             case _:
                 pass
@@ -652,7 +668,11 @@ def _sample_pad_held(keys_dict: dict[int, bool]) -> None:
 
 
 class _AugmentedKeys:
-    """Wraps pygame.key.get_pressed() with extra virtual-press flags from gamepad."""
+    """Wraps pygame.key.get_pressed() with extra virtual-press flags from gamepad.
+
+    Implements the subset of ScancodeWrapper that the game actually uses
+    (item access, length, iteration, contains).
+    """
     __slots__ = ("_real", "_extra")
 
     def __init__(self, real: pygame.key.ScancodeWrapper, extra: dict[int, bool]):
@@ -660,6 +680,16 @@ class _AugmentedKeys:
         self._extra = extra
 
     def __getitem__(self, key: int) -> bool:
+        return bool(self._real[key]) or bool(self._extra.get(key))
+
+    def __len__(self) -> int:
+        return len(self._real)
+
+    def __iter__(self):
+        # pygame.key.ScancodeWrapper isn't iterable; expose indices instead.
+        return iter(range(len(self._real)))
+
+    def __contains__(self, key: int) -> bool:
         return bool(self._real[key]) or bool(self._extra.get(key))
 
 

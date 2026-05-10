@@ -28,7 +28,6 @@ from .constants import (
     JUMP_SPEED,
     KICK_DAMAGE,
     KICK_FRAMES,
-    NATIVE_W,
     PALETTE,
     PLAYER_MAX_HP,
     PUNCH_DAMAGE,
@@ -45,8 +44,6 @@ from .constants import (
     Facing,
     PlayerState,
 )
-
-NATIVE_W_FOR_BOSS = NATIVE_W
 
 if TYPE_CHECKING:
     from .level import Level
@@ -95,7 +92,6 @@ class Player:
     score: int = 0
     walk_anim: float = 0.0
     next_extra_life: int = 20_000
-    queued_throw: bool = False
     combo: int = 0
     combo_timer: int = 0
 
@@ -168,7 +164,10 @@ class Player:
             self.vx = SLIDE_SPEED * self.facing
         elif dive:
             self.vx = 0  # straight down
-        elif not attacking or not self.on_ground:
+        elif attacking and self.on_ground:
+            # Committed ground attacks: no momentum carryover.
+            self.vx = 0
+        else:
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
                 ax -= 1
                 self.facing = Facing.LEFT
@@ -198,12 +197,10 @@ class Player:
         if landed_y is not None:
             self.y = landed_y
             self.vy = 0
-            if not self.on_ground:
-                if self.state is PlayerState.JUMP:
-                    self.state = PlayerState.IDLE
-                elif self.state is PlayerState.DIVEKICK:
-                    self.state = PlayerState.IDLE
-                    self.state_timer = 0
+            if not self.on_ground and self.state is PlayerState.JUMP:
+                self.state = PlayerState.IDLE
+            # Defer DIVEKICK→IDLE for one frame (handled by state_timer below)
+            # so attack_hitbox stays valid on the landing-impact frame.
             self.on_ground = True
         else:
             self.on_ground = False
@@ -211,12 +208,15 @@ class Player:
         # World bounds
         self.x = max(8, min(self.x, level.width_px - 8))
 
-        # State machine timing
+        # State machine timing — DIVEKICK exits when on_ground (after the
+        # post-landing attack-hitbox frame has been processed by the world).
+        if self.state is PlayerState.DIVEKICK and self.on_ground and self.state_timer == 0:
+            self.state_timer = 1  # one extra frame so attack_hitbox lands
         if self.state_timer > 0:
             self.state_timer -= 1
             if self.state_timer == 0 and self.state in {
                 PlayerState.PUNCH, PlayerState.KICK, PlayerState.THROW, PlayerState.HURT,
-                PlayerState.SLIDE,
+                PlayerState.SLIDE, PlayerState.DIVEKICK,
             }:
                 self.state = PlayerState.IDLE
         if self.iframes > 0:
@@ -289,11 +289,11 @@ class Player:
         self.iframes = IFRAMES
         if self.hp <= 0:
             self.lives -= 1
-            audio.death().play()
             if self.lives <= 0:
                 self.state = PlayerState.DEAD
                 self.state_timer = 120
                 self.vy = -6
+                audio.death().play()
             else:
                 self.hp = PLAYER_MAX_HP
                 self.state = PlayerState.HURT
@@ -438,6 +438,9 @@ class Enemy:
     boss: bool = False
     phase: int = 1
     phase_timer: int = 0
+    arena_left: float = 0.0
+    arena_right: float = 0.0
+    dived_this_cycle: bool = False
 
     @classmethod
     def spawn(cls, kind: EnemyKind, x: float, y: float) -> Enemy:
@@ -602,8 +605,13 @@ class Enemy:
                 self.vy = 0
                 self.on_ground = True
         self.facing = Facing.LEFT if player.x < self.x else Facing.RIGHT
-        # Stay near arena center
-        self.x += (level.cam_x + 200 - self.x) * 0.005
+        # Stay near arena center (fixed at spawn time, not the live camera)
+        if self.arena_right == 0:
+            self.arena_left = self.x - 80
+            self.arena_right = self.x + 80
+        center = (self.arena_left + self.arena_right) / 2
+        self.x += (center - self.x) * 0.005
+        self.x = max(self.arena_left, min(self.x, self.arena_right))
         if self.attack_cooldown <= 0:
             self.attack_cooldown = 75
             # Triple-card spread
@@ -642,10 +650,11 @@ class Enemy:
             self.y = GROUND_Y - self.H
             self.vy = 0
             self.on_ground = True
-        # Stay in arena
-        left = level.cam_x + 30
-        right = level.cam_x + NATIVE_W_FOR_BOSS - self.W - 30
-        self.x = max(left, min(self.x, right))
+        # Stay in arena (fixed at spawn time)
+        if self.arena_right == 0:
+            self.arena_left = self.x - 100
+            self.arena_right = self.x + 100
+        self.x = max(self.arena_left, min(self.x, self.arena_right))
         return None
 
     def _update_boss(self, player: Player, level: Level) -> EnemyProjectile | None:
@@ -670,12 +679,26 @@ class Enemy:
         self.vx = math.sin(self.walk_anim) * 1.2 * speed_scale
         self.x += self.vx
         self.facing = Facing.LEFT if player.x < self.x else Facing.RIGHT
-        self.x = max(level.cam_x + 40, min(self.x, level.cam_x + 280))
+        # Pin Penguin to a fixed arena recorded at spawn (NOT the live camera)
+        if self.arena_right == 0:
+            self.arena_left = self.x - 100
+            self.arena_right = self.x + 100
+        self.x = max(self.arena_left, min(self.x, self.arena_right))
 
-        # Occasional dive in phase 2/3 (jumps into the air for shadow scare)
-        if self.phase >= 2 and self.on_ground and self.attack_cooldown == 12:
+        # Occasional dive in phase 2/3 (jumps into the air for shadow scare).
+        # Trigger once mid-cycle; reset flag when cooldown completes.
+        if self.attack_cooldown <= 0:
+            self.dived_this_cycle = False
+        if (
+            self.phase >= 2
+            and self.on_ground
+            and not self.dived_this_cycle
+            and self.attack_cooldown <= 14
+            and self.attack_cooldown > 0
+        ):
             self.vy = -5.5
             self.on_ground = False
+            self.dived_this_cycle = True
         if not self.on_ground:
             self.vy += 0.4
             self.y += self.vy
@@ -755,7 +778,8 @@ class Enemy:
         sprite_name = self._sprite_name()
         if sprite_name is None:
             return
-        getter = sprites.get_flipped if self.facing is Facing.RIGHT else sprites.get
+        # Sprites are drawn facing right by convention (matches Player.draw).
+        getter = sprites.get_flipped if self.facing is Facing.LEFT else sprites.get
         img = getter(sprite_name)
         if self.iframes and self.iframes % 2 == 0:
             tinted = img.copy()
