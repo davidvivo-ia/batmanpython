@@ -33,7 +33,6 @@ as a future addition.
 
 ## Modern Python (2026) features used
 
-- **PEP 695 `type` aliases** (`type RGB = tuple[int, int, int]`) — `constants.py`
 - **PEP 634 structural pattern matching** for state machines & sprite dispatch
 - **`StrEnum` / `IntEnum` / `auto()`** for typed states
 - **Slotted dataclasses** (`@dataclass(slots=True)`) for cache-friendly entities
@@ -41,8 +40,8 @@ as a future addition.
 - **`functools.cache`** for sprite-surface memoisation
 - **`numpy`** for procedural ADSR/oscillator SFX synthesis
 - **`pygame-ce`** (community edition) — actively maintained pygame fork
-- Strict `ruff` lint config, hatchling build backend, Python `>=3.12`
-- **GitHub Actions CI** matrix on Python 3.12 + 3.13 (ruff + pytest with SDL dummy drivers)
+- Strict `ruff` lint config, hatchling build backend, Python `>=3.11`
+- **GitHub Actions CI** matrix on Python 3.11 / 3.12 / 3.13 (ruff + pytest with SDL dummy drivers)
 
 ## Features beyond the original
 
@@ -77,7 +76,7 @@ python -m pip install -e .
 python -m batman_returns       # or just:  batman-returns
 ```
 
-Requires Python ≥ 3.12 (3.13 recommended).
+Requires Python ≥ 3.11 (3.12 / 3.13 recommended).
 
 ## Controls
 

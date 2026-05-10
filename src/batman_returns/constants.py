@@ -45,7 +45,8 @@ SCORE_BOSS: Final = 5000
 EXTRA_LIFE_AT: Final = 20_000
 
 # --- Palette (NES-ish high-contrast, 16 colors) ---
-type RGB = tuple[int, int, int]
+# (Plain assignment instead of PEP 695 `type` so we stay compatible with 3.11.)
+RGB = tuple[int, int, int]
 PALETTE: Final[dict[str, RGB]] = {
     "black":      (10, 10, 14),
     "dark":       (24, 22, 38),

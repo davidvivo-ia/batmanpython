@@ -7,7 +7,7 @@ name = "batman-returns-py"
 version = "1.0.0"
 description = "A modern Python homage to Batman Returns (Sega CD, 1992) — beat-'em-up engine inspired by the original 68000 ASM source."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "batmanpython contributors" }]
 keywords = ["batman", "pygame", "retro", "beat-em-up", "sega-cd"]
@@ -24,7 +24,7 @@ packages = ["src/batman_returns"]
 
 [tool.ruff]
 line-length = 110
-target-version = "py312"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
