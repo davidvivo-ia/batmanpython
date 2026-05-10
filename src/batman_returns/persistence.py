@@ -44,6 +44,9 @@ class SaveData:
     highest_cleared_stage: int = -1        # -1 = none cleared, 0 = stage 1, etc
     beat_game: bool = False
     show_fps: bool = False
+    language: str = "en"                   # "en" | "es"
+    ng_plus: bool = False                  # currently in New Game Plus
+    batcave_unlocked: bool = False         # secret 8th stage
 
     def push_score(self, score: int) -> bool:
         """Insert score, keep top 5. Returns True if THIS submission made the table."""

@@ -132,6 +132,17 @@ STAGES: Final = (
         platform_sprite="tile_brick",
         foreground="pillar",
     ),
+    # Secret 8th stage: only listed in STAGE_SELECT after first full clear.
+    Stage(
+        name="THE BATCAVE",
+        length_tiles=160,
+        ground_tile="tile_brick",
+        sky_top=(5, 5, 12),
+        sky_bot=(28, 18, 40),
+        enemy_density=0.25,  # very dense
+        platform_sprite="tile_brick",
+        foreground="pillar",
+    ),
 )
 
 
@@ -209,7 +220,9 @@ class Level:
             while tx < self.stage.length_tiles - 20:
                 if rng.random() < self.stage.hazard_density:
                     width = rng.randint(2, 4)
-                    end = min(tx + width - 1, self.stage.length_tiles - 22)
+                    end = tx + width - 1
+                    if end >= self.stage.length_tiles - 20:
+                        break  # don't spawn hazards too close to the goal
                     self.hazards.append((tx, end))
                     tx = end + rng.randint(4, 8)
                     # Drop a rescue platform above wide hazards so the player

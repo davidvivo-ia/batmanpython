@@ -97,6 +97,9 @@ class Player:
     last_throw_flash: int = 0  # frames remaining of HUD batarang flash
     charge_frames: int = 0     # how long C is held (for charged shot)
     _last_safe_x: float = 32.0  # last on-ground non-hazard x for pit respawn
+    invuln_timer: int = 0       # frames of full invincibility (power-up)
+    damage_buff_timer: int = 0  # frames of 2x damage
+    infinite_bat_timer: int = 0  # frames of free batarangs
 
     W: int = 12
     H: int = 24
@@ -133,7 +136,10 @@ class Player:
                 base = DIVEKICK_DAMAGE
             case _:
                 return 0
-        return int(base * (1 + self.combo * COMBO_DAMAGE_BONUS))
+        out = int(base * (1 + self.combo * COMBO_DAMAGE_BONUS))
+        if self.damage_buff_timer > 0:
+            out *= 2
+        return out
 
     def register_combo_hit(self) -> None:
         self.combo += 1
@@ -247,6 +253,12 @@ class Player:
             self.iframes -= 1
         if self.last_throw_flash > 0:
             self.last_throw_flash -= 1
+        if self.invuln_timer > 0:
+            self.invuln_timer -= 1
+        if self.damage_buff_timer > 0:
+            self.damage_buff_timer -= 1
+        if self.infinite_bat_timer > 0:
+            self.infinite_bat_timer -= 1
 
         # Determine animation state if not locked
         if self.state in {PlayerState.IDLE, PlayerState.WALK, PlayerState.JUMP}:
@@ -296,9 +308,9 @@ class Player:
     def try_throw(self, *, charged: bool = False) -> Batarang | None:
         if self.state not in {PlayerState.IDLE, PlayerState.WALK, PlayerState.JUMP}:
             return None
-        if not charged and self.batarangs <= 0:
+        if not charged and self.batarangs <= 0 and self.infinite_bat_timer <= 0:
             return None
-        if not charged:
+        if not charged and self.infinite_bat_timer <= 0:
             self.batarangs -= 1
         self.state = PlayerState.THROW
         self.state_timer = 14
@@ -313,7 +325,7 @@ class Player:
         )
 
     def take_damage(self, dmg: int) -> None:
-        if self.iframes > 0 or self.state is PlayerState.DEAD:
+        if self.iframes > 0 or self.state is PlayerState.DEAD or self.invuln_timer > 0:
             return
         self.hp -= dmg
         self.iframes = IFRAMES
@@ -351,6 +363,18 @@ class Player:
         # Flicker on i-frames
         if self.iframes and self.iframes % 4 < 2:
             return
+        # Invuln rainbow tint
+        if self.invuln_timer > 0:
+            tinted = img.copy()
+            phase = (self.invuln_timer // 4) % 4
+            tints = [
+                (255, 100, 100, 0),
+                (100, 255, 100, 0),
+                (100, 100, 255, 0),
+                (255, 255, 100, 0),
+            ]
+            tinted.fill(tints[phase], special_flags=pygame.BLEND_RGBA_ADD)
+            img = tinted
         sx = level.world_to_screen(self.x) - img.get_width() // 2
         sy = int(self.y) - 0
         surf.blit(img, (sx, sy))
@@ -394,16 +418,35 @@ class Batarang:
     trail: list[tuple[float, float]] = field(default_factory=list)
     piercing: bool = False  # charged shot: keeps going after a hit
     hit_set: set[int] = field(default_factory=set)  # ids of enemies already hit
+    initial_vx: float = 0.0
+    returning: bool = False
+    owner_x_ref: float = 0.0  # latest player.x, set by game.py each frame
 
     def update(self, level: Level) -> None:
         # Record trail position before updating
         self.trail.append((self.x, self.y))
         if len(self.trail) > 5:
             self.trail.pop(0)
+        if self.initial_vx == 0.0:
+            self.initial_vx = self.vx
+        # After ~half its life, decelerate and reverse direction (boomerang).
+        if not self.returning and self.life < 45:
+            # Smooth deceleration; once vx flips sign, mark as returning
+            self.vx -= self.initial_vx * 0.04
+            if (self.initial_vx > 0 and self.vx <= 0) or (self.initial_vx < 0 and self.vx >= 0):
+                self.returning = True
+                self.hit_set.clear()  # piercing-on-return can hit enemies again
+        elif self.returning:
+            # Home gently toward the player so it can be re-caught
+            target_dx = self.owner_x_ref - self.x
+            self.vx += 0.18 * (1 if target_dx > 0 else -1)
+            self.vx = max(-4.5, min(4.5, self.vx))
         self.x += self.vx
         self.spin += 0.5
         self.life -= 1
-        if self.life <= 0 or self.x < level.cam_x - 32 or self.x > level.cam_x + 360:
+        # Despawn if off-camera in either direction; returning batarangs that
+        # passed the player still expire when they leave the screen.
+        if self.life <= 0 or self.x < level.cam_x - 40 or self.x > level.cam_x + 360:
             self.alive = False
 
     def draw(self, surf: pygame.Surface, level: Level) -> None:
@@ -797,6 +840,20 @@ class Enemy:
         return None
 
     def _update_catwoman(self, player: Player, level: Level) -> EnemyProjectile | None:
+        # Whip attack: every other cycle, fire a fast horizontal whip projectile
+        # instead of lunging.
+        if self.attack_cooldown <= 0 and abs(player.x - self.x) > 50 and abs(player.x - self.x) < 120:
+            if self.state_timer == 0 and (int(self.walk_anim * 7) % 2 == 0):
+                self.attack_cooldown = 70
+                self.telegraph = 12  # brief flash
+                return EnemyProjectile(
+                    x=self.x + self.facing * 8, y=self.y + 14,
+                    vx=5.0 * self.facing, vy=0,
+                    sprite="knife_proj", damage=14, life=35,
+                )
+        return self._update_catwoman_lunge(player, level)
+
+    def _update_catwoman_lunge(self, player: Player, level: Level) -> EnemyProjectile | None:
         # Acrobatic: lunges horizontally, claws on contact, occasionally jumps over
         dx = player.x - self.x
         self.facing = Facing.LEFT if dx < 0 else Facing.RIGHT
@@ -1070,6 +1127,12 @@ class Pickup:
                 player.lives += 1
             case "smoke":
                 pass  # AOE applied by game.py once it sees the pickup landed
+            case "invuln":
+                player.invuln_timer = 300  # 5 seconds
+            case "dmg2x":
+                player.damage_buff_timer = 480  # 8 seconds
+            case "infbat":
+                player.infinite_bat_timer = 360  # 6 seconds
         audio.pickup().play()
         self.alive = False
 
@@ -1091,15 +1154,33 @@ class Pickup:
                 pygame.draw.circle(surf, PALETTE["gray"], (sx, sy), 6)
                 pygame.draw.circle(surf, PALETTE["lightgray"], (sx - 2, sy - 1), 3)
                 pygame.draw.circle(surf, PALETTE["white"], (sx + 2, sy + 1), 2)
+            case "invuln":
+                pygame.draw.rect(surf, PALETTE["yellow"], (sx - 6, sy - 6, 12, 12))
+                pygame.draw.rect(surf, PALETTE["black"], (sx - 4, sy - 4, 8, 8))
+                pygame.draw.rect(surf, PALETTE["yellow"], (sx - 2, sy - 2, 4, 4))
+            case "dmg2x":
+                pygame.draw.rect(surf, PALETTE["red"], (sx - 6, sy - 6, 12, 12))
+                pygame.draw.rect(surf, PALETTE["white"], (sx - 4, sy - 4, 3, 8))
+                pygame.draw.rect(surf, PALETTE["white"], (sx + 1, sy - 4, 3, 8))
+            case "infbat":
+                pygame.draw.rect(surf, PALETTE["night"], (sx - 6, sy - 5, 12, 10))
+                pygame.draw.circle(surf, PALETTE["yellow"], (sx - 3, sy), 2)
+                pygame.draw.circle(surf, PALETTE["yellow"], (sx + 3, sy), 2)
 
 
 def random_pickup(x: float, rng: random.Random | None = None) -> Pickup:
     rng = rng or random
     roll = rng.random()
-    if roll < 0.50:
+    if roll < 0.42:
         return Pickup("health", x, GROUND_Y - 8)
-    if roll < 0.83:
+    if roll < 0.70:
         return Pickup("batarang", x, GROUND_Y - 8)
-    if roll < 0.96:
+    if roll < 0.82:
         return Pickup("1up", x, GROUND_Y - 8)
+    if roll < 0.88:
+        return Pickup("invuln", x, GROUND_Y - 8)
+    if roll < 0.94:
+        return Pickup("dmg2x", x, GROUND_Y - 8)
+    if roll < 0.97:
+        return Pickup("infbat", x, GROUND_Y - 8)
     return Pickup("smoke", x, GROUND_Y - 8)

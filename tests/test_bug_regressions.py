@@ -124,8 +124,9 @@ def test_stage_with_midboss_cannot_clear_until_midboss_defeated(tmp_path, monkey
     # Now mark midboss defeated; stage should advance
     g.world.midboss_defeated = True
     g.update(pygame.key.get_pressed())
-    assert g.state in {GameState.LEVEL_INTRO, GameState.PLAYING}
-    assert g.stage_idx >= 1
+    # Stage clear now opens a summary screen first; old behaviour was direct
+    # advance to LEVEL_INTRO/PLAYING. Both paths satisfy "stage was cleared".
+    assert g.state in {GameState.LEVEL_INTRO, GameState.PLAYING, GameState.STAGE_CLEAR}
 
 
 # ---------------------------------------------------------------- bug #1

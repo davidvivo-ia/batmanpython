@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import pygame
 
-from . import audio, music, persistence, sprites
+from . import audio, i18n, music, persistence, sprites
 from .achievements import AchievementTracker
 from .constants import (
     DIFFICULTY_SCALARS,
@@ -69,6 +69,13 @@ class World:
     frame: int = 0
     difficulty: str = "normal"
     first_kill_done: bool = False
+    # Stats for stage-clear summary
+    kills: int = 0
+    damage_taken: int = 0
+    pickups_collected: int = 0
+    time_frames: int = 0
+    combo_max: int = 0
+    batarangs_used: int = 0
 
 
 def _spawn_for_stage(world: World) -> None:
@@ -220,7 +227,15 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
 
     # Update projectiles
     for b in world.batarangs:
+        b.owner_x_ref = p.x
         b.update(world.level)
+        # Re-catch on the return leg if it overlaps the player.
+        if b.returning and b.alive and b.hitbox.intersects(p.hitbox):
+            b.alive = False
+            p.batarangs += 1
+            world.particles.emit(p.x, p.y + 6, count=6, speed=1.4, life=12,
+                                 color=PALETTE["yellow"])
+            world.floats.emit("RECATCH", p.x, p.y - 12, PALETTE["yellow"])
     for s in world.enemy_shots:
         s.update(world.level)
     for pk in world.pickups:
@@ -240,6 +255,7 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
                 world.shake.kick(2.5)
                 killed = e.take_damage(dmg, knockback=kb)
                 if killed:
+                    world.kills += 1
                     pts = p.combo_score_bonus(e.score_value)
                     _award(world, pts, e.x, e.y)
                     world.particles.burst_blood(cx, cy, dir_sign=p.facing)
@@ -283,6 +299,7 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
             world.particles.spark(cx, cy, PALETTE["white"])
             killed = e.take_damage(b.damage, knockback=2.0 * (1 if b.vx > 0 else -1))
             if killed:
+                world.kills += 1
                 _award(world, e.score_value, e.x, e.y)
                 world.particles.burst_blood(cx, cy, dir_sign=1 if b.vx > 0 else -1)
                 world.shake.kick(4.0)
@@ -327,6 +344,9 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
                 "batarang": "+3 BAT",
                 "1up": "1UP",
                 "smoke": "SMOKE BOMB!",
+                "invuln": "INVINCIBLE!",
+                "dmg2x": "2X DAMAGE!",
+                "infbat": "INFINITE BAT!",
             }[pk.kind]
             world.floats.emit(label, pk.x, pk.y, PALETTE["green"])
             pk.apply(p)
@@ -347,9 +367,12 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
                     )
                 world.shake.kick(6.0)
 
-    # Track damage taken for "no damage" achievement
+    # Track damage taken for "no damage" achievement + stage stats
     if p.hp < hp_before:
         world.achievements.on_damage(hp_before - p.hp)
+        world.damage_taken += hp_before - p.hp
+    world.combo_max = max(world.combo_max, p.combo)
+    world.time_frames += 1
     world.achievements.on_score(p.score)
 
     # FX update
@@ -553,19 +576,21 @@ def _draw_settings(surf: pygame.Surface, save: persistence.SaveData, cursor: int
     overlay = pygame.Surface((NATIVE_W, NATIVE_H), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 200))
     surf.blit(overlay, (0, 0))
-    draw_text(surf, "SETTINGS", NATIVE_W // 2 - 36, 24, PALETTE["yellow"], scale=2)
+    draw_text(surf, i18n.t("settings"), NATIVE_W // 2 - 36, 16, PALETTE["yellow"], scale=2)
+    lang_label = "ENG" if save.language == "en" else "ESP"
     items = [
-        f"DIFFICULTY    {save.difficulty.upper()}",
-        f"SFX VOLUME    {int(save.sfx_volume * 100):3d}",
-        f"MUSIC VOLUME  {int(save.music_volume * 100):3d}",
-        f"SHOW FPS      {'ON' if save.show_fps else 'OFF'}",
-        "RESET HIGH SCORES",
-        "BACK",
+        f"{i18n.t('difficulty'):12s} {save.difficulty.upper()}",
+        f"{i18n.t('sfx_volume'):12s} {int(save.sfx_volume * 100):3d}",
+        f"{i18n.t('music_volume'):12s} {int(save.music_volume * 100):3d}",
+        f"{i18n.t('show_fps'):12s} {'ON' if save.show_fps else 'OFF'}",
+        f"{i18n.t('language'):12s} {lang_label}",
+        i18n.t("reset_high_scores"),
+        i18n.t("back"),
     ]
     for i, label in enumerate(items):
         col = PALETTE["yellow"] if i == cursor else PALETTE["lightgray"]
         prefix = "> " if i == cursor else "  "
-        draw_text(surf, prefix + label, 60, 70 + i * 16, col)
+        draw_text(surf, prefix + label, 40, 50 + i * 14, col)
     draw_text(surf, "UP/DOWN MOVE  ENTER CHANGE  ESC BACK", 16, NATIVE_H - 16, PALETTE["gray"])
 
 
@@ -574,15 +599,57 @@ def _draw_stage_select(surf: pygame.Surface, save: persistence.SaveData, cursor:
     overlay.fill((0, 0, 0, 220))
     surf.blit(overlay, (0, 0))
     draw_text(surf, "STAGE SELECT", NATIVE_W // 2 - 50, 16, PALETTE["yellow"], scale=2)
-    names = [f"{i+1}. {STAGES[i].name}" for i in range(len(STAGES))]
-    max_unlocked = (save.highest_cleared_stage + 1) if not save.beat_game else len(STAGES) - 1
+    # Hide the secret Batcave (index 7) until the player has unlocked it.
+    last_visible = 7 if save.batcave_unlocked else 6
+    names = [f"{i+1}. {STAGES[i].name}" for i in range(last_visible + 1)]
+    max_unlocked = save.highest_cleared_stage + 1
+    if save.beat_game:
+        max_unlocked = last_visible
     for i, name in enumerate(names):
         unlocked = i <= max_unlocked
         col = PALETTE["yellow"] if i == cursor else (PALETTE["lightgray"] if unlocked else PALETTE["gray"])
         prefix = "> " if i == cursor else "  "
         suffix = "" if unlocked else "  [LOCKED]"
         draw_text(surf, prefix + name + suffix, 50, 50 + i * 14, col)
+    if save.beat_game and save.batcave_unlocked:
+        draw_text(surf, "* BATCAVE UNLOCKED", NATIVE_W // 2 - 60, NATIVE_H - 30, PALETTE["yellow"])
     draw_text(surf, "ENTER START  ESC BACK", NATIVE_W // 2 - 60, NATIVE_H - 16, PALETTE["gray"])
+
+
+def _draw_stage_clear(
+    surf: pygame.Surface,
+    stage_idx: int,
+    kills: int, time_frames: int, no_damage: bool, combo_max: int,
+    total_bonus: int, anim_frame: int,
+) -> None:
+    """Show the stage-clear summary with progressively-revealed lines."""
+    surf.fill(PALETTE["dark"])
+    name = STAGES[stage_idx].name
+    draw_text(surf, "STAGE CLEAR!", NATIVE_W // 2 - 60, 16, PALETTE["yellow"], scale=2)
+    draw_text(surf, name, NATIVE_W // 2 - len(name) * 3, 38, PALETTE["white"])
+    secs = time_frames // 60
+    minutes = secs // 60
+    secs %= 60
+    rows = [
+        (f"KILLS  x{kills:3d}", kills * 500),
+        (f"TIME   {minutes:1d}:{secs:02d}", max(0, 5000 - time_frames * 2)),
+        (f"MAX COMBO  x{combo_max:2d}", max(0, (combo_max - 2) * 300)),
+    ]
+    if no_damage:
+        rows.append(("NO-DAMAGE BONUS", 5000))
+    y = 70
+    for i, (label, value) in enumerate(rows):
+        if anim_frame > i * 12:
+            col = PALETTE["yellow"] if anim_frame > (i + 1) * 12 else PALETTE["lightgray"]
+            draw_text(surf, label, 40, y, col)
+            draw_text(surf, f"+{value}", NATIVE_W - 80, y, col)
+        y += 14
+    if anim_frame > len(rows) * 12:
+        pygame.draw.line(surf, PALETTE["white"], (40, y + 2), (NATIVE_W - 40, y + 2))
+        draw_text(surf, "TOTAL", 40, y + 8, PALETTE["yellow"], scale=2)
+        draw_text(surf, f"+{total_bonus}", NATIVE_W - 100, y + 8, PALETTE["yellow"], scale=2)
+    if anim_frame > 80 and (anim_frame // 30) % 2 == 0:
+        draw_text(surf, "PRESS ENTER TO CONTINUE", NATIVE_W // 2 - 80, NATIVE_H - 20, PALETTE["white"])
 
 
 def _draw_high_scores(surf: pygame.Surface, scores: list[int]) -> None:
@@ -596,7 +663,7 @@ def _draw_high_scores(surf: pygame.Surface, scores: list[int]) -> None:
 
 
 def _stage_objective_line(stage_idx: int) -> str:
-    return [
+    lines = [
         "OBJECTIVE: DEFEAT JOKER, REACH THE FLAG",
         "OBJECTIVE: WATCH YOUR STEP — REACH THE FLAG",
         "OBJECTIVE: AVOID THE WATER — REACH THE FLAG",
@@ -604,7 +671,9 @@ def _stage_objective_line(stage_idx: int) -> str:
         "OBJECTIVE: CROSS THE DOCKS — REACH THE FLAG",
         "OBJECTIVE: SURVIVE ARKHAM — REACH THE FLAG",
         "OBJECTIVE: DEFEAT THE PENGUIN",
-    ][stage_idx]
+        "OBJECTIVE: BONUS GAUNTLET — SURVIVE THE BATCAVE",
+    ]
+    return lines[min(stage_idx, len(lines) - 1)]
 
 
 def _draw_intro(surf: pygame.Surface, level: Level, blink: int, stage_idx: int) -> None:
@@ -668,6 +737,15 @@ class Game:
     tutorial_timer: int = 0
     tutorial_seen_first_enemy: bool = False
     tutorial_active: bool = False
+    # Stage clear summary state
+    clear_kills: int = 0
+    clear_time_frames: int = 0
+    clear_damage_taken: int = 0
+    clear_combo_max: int = 0
+    clear_total_bonus: int = 0
+    clear_no_damage: bool = False
+    clear_anim_frame: int = 0
+    pending_stage_idx: int = 0
 
     def _title_items(self) -> list[str]:
         last = len(STAGES) - 1
@@ -740,19 +818,43 @@ class Game:
 
     def advance_stage(self) -> None:
         assert self.world is not None
-        # Check the per-stage "no damage" achievement
+        # Capture stats for the post-stage summary
+        self.clear_kills = self.world.kills
+        self.clear_time_frames = self.world.time_frames
+        self.clear_damage_taken = self.world.damage_taken
+        self.clear_combo_max = self.world.combo_max
+        self.clear_no_damage = self.world.damage_taken == 0
+        # Compute bonuses
+        kill_bonus = self.clear_kills * 500
+        time_bonus = max(0, 5000 - self.clear_time_frames * 2)
+        no_dmg_bonus = 5000 if self.clear_no_damage else 0
+        combo_bonus = max(0, (self.clear_combo_max - 2) * 300)
+        self.clear_total_bonus = kill_bonus + time_bonus + no_dmg_bonus + combo_bonus
+        self.world.player.score += self.clear_total_bonus
+
+        # Achievement + persistence
         self.world.achievements.on_stage_clear()
-        # Persist any new unlocks + record highest cleared stage
         self.save.unlocked = sorted(self.world.achievements.unlocked)
         self.save.highest_cleared_stage = max(self.save.highest_cleared_stage, self.stage_idx)
         persistence.save(self.save)
-        if self.stage_idx + 1 >= len(STAGES):
+        # Transition to summary screen; advance world after player dismisses.
+        self.pending_stage_idx = self.stage_idx + 1
+        self.clear_anim_frame = 0
+        self.state = GameState.STAGE_CLEAR
+
+    def commit_stage_advance(self) -> None:
+        """Called when the player dismisses the STAGE_CLEAR summary."""
+        assert self.world is not None
+        # Treat Penguin (stage 6) as the natural campaign end. Everything past
+        # that (Batcave, etc.) is endgame content that doesn't auto-advance.
+        if self.stage_idx == 6 or self.pending_stage_idx >= len(STAGES):
             self.save.beat_game = True
+            self.save.batcave_unlocked = True
             persistence.save(self.save)
             self.state = GameState.VICTORY
             music.stop()
             return
-        self.stage_idx += 1
+        self.stage_idx = self.pending_stage_idx
         prev_tracker = self.world.achievements
         self.world = self._make_world(carry=self.world.player, carry_tracker=prev_tracker)
         self.world.achievements.reset_for_stage(self.world.player.hp)
@@ -806,6 +908,9 @@ class Game:
             case GameState.HIGH_SCORES:
                 if event.key in {pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER}:
                     self.state = GameState.TITLE
+            case GameState.STAGE_CLEAR:
+                if event.key in {pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE}:
+                    self.commit_stage_advance()
             case GameState.LEVEL_INTRO:
                 # Skip intro with any key (after a brief minimum read time).
                 if self.intro_timer < 150:  # require at least 30 frames of view
@@ -834,6 +939,7 @@ class Game:
                         bat = p.try_throw()
                         if bat is not None:
                             self.world.batarangs.append(bat)
+                            self.world.batarangs_used += 1
                             # Launch FX so player can see the throw register.
                             self.world.particles.emit(
                                 bat.x, bat.y,
@@ -877,7 +983,7 @@ class Game:
         return True
 
     def _handle_settings_key(self, event: pygame.event.Event) -> None:
-        n = 6
+        n = 7
         if event.key in {pygame.K_UP, pygame.K_w}:
             self.settings_cursor = (self.settings_cursor - 1) % n
         elif event.key in {pygame.K_DOWN, pygame.K_s}:
@@ -896,9 +1002,12 @@ class Game:
                     music.set_volume(self.save.music_volume)
                 case 3:  # Show FPS
                     self.save.show_fps = not self.save.show_fps
-                case 4:  # Reset high scores
+                case 4:  # Language
+                    self.save.language = "es" if self.save.language == "en" else "en"
+                    i18n.set_language(self.save.language)
+                case 5:  # Reset high scores
                     self.save.high_scores = []
-                case 5:  # Back
+                case 6:  # Back
                     self.state = GameState.TITLE
             persistence.save(self.save)
         elif event.key == pygame.K_ESCAPE:
@@ -966,6 +1075,8 @@ class Game:
                 self.intro_timer -= 1
                 if self.intro_timer <= 0:
                     self.state = GameState.PLAYING
+            case GameState.STAGE_CLEAR:
+                self.clear_anim_frame += 1
             case GameState.PLAYING if self.world is not None:
                 _update_world(self.world, keys)
                 w = self.world
@@ -1009,6 +1120,13 @@ class Game:
                 _draw_stage_select(c, self.save, self.stage_select_cursor)
             case GameState.LEVEL_INTRO if self.world is not None:
                 _draw_intro(c, self.world.level, self.blink, self.stage_idx)
+            case GameState.STAGE_CLEAR if self.world is not None:
+                _draw_stage_clear(
+                    c, self.stage_idx,
+                    self.clear_kills, self.clear_time_frames,
+                    self.clear_no_damage, self.clear_combo_max,
+                    self.clear_total_bonus, self.clear_anim_frame,
+                )
             case GameState.PLAYING if self.world is not None:
                 _draw_world(c, self.world)
                 if self.tutorial_active and self.tutorial_text:
@@ -1173,4 +1291,5 @@ def create_game() -> Game:
         sprites.get(name)
     g = Game(screen=screen, canvas=canvas, clock=clock)
     audio.set_sfx_volume(g.save.sfx_volume)
+    i18n.set_language(g.save.language)
     return g

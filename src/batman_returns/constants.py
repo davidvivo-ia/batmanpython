@@ -74,6 +74,7 @@ class GameState(StrEnum):
     GAME_OVER = auto()
     VICTORY = auto()
     LEVEL_INTRO = auto()
+    STAGE_CLEAR = auto()      # post-stage summary + bonuses
     HIGH_SCORES = auto()
     PAUSE_CONTROLS = auto()   # sub-screen: full controls reference
     SETTINGS = auto()
@@ -92,6 +93,11 @@ DIFFICULTY_SCALARS = {
     "normal": {"enemy_hp": 1.0, "enemy_dmg": 1.0, "starting_batarangs": 5},
     "hard":   {"enemy_hp": 1.5, "enemy_dmg": 1.4, "starting_batarangs": 3},
 }
+
+# New Game Plus modifies the difficulty scalar on top.
+NG_PLUS_HP_MULT = 2.0
+NG_PLUS_DMG_MULT = 1.5
+NG_PLUS_LIVES_DELTA = -1  # one less starting life
 
 
 class PlayerState(StrEnum):

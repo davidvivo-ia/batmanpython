@@ -15,13 +15,14 @@ def _ensure_pygame():
     pygame.init()
 
 
-def test_all_seven_stages_have_unique_names() -> None:
+def test_all_stages_have_unique_names() -> None:
     names = [s.name for s in STAGES]
-    assert len(set(names)) == 7
+    assert len(set(names)) == len(STAGES)
     assert "GOTHAM ROOFTOPS" in names
     assert "THE SEWERS" in names
     assert "HARBOR DOCKS" in names
     assert "ARKHAM ASYLUM" in names
+    assert "THE BATCAVE" in names
 
 
 def test_stages_with_hazards_generate_hazard_zones() -> None:

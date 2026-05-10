@@ -178,6 +178,20 @@ def draw_hud(surf: pygame.Surface, player: Player, stage_name: str, objective: s
     if objective:
         draw_objective(surf, objective)
 
+    # Power-up timers (top-right corner)
+    by = 30
+    if player.invuln_timer > 0:
+        secs = (player.invuln_timer + 59) // 60
+        draw_text(surf, f"INV {secs}", NATIVE_W - 50, by, PALETTE["yellow"])
+        by += 10
+    if player.damage_buff_timer > 0:
+        secs = (player.damage_buff_timer + 59) // 60
+        draw_text(surf, f"2X {secs}", NATIVE_W - 50, by, PALETTE["red"])
+        by += 10
+    if player.infinite_bat_timer > 0:
+        secs = (player.infinite_bat_timer + 59) // 60
+        draw_text(surf, f"INF {secs}", NATIVE_W - 50, by, PALETTE["lightgray"])
+
     # Combo indicator
     if player.combo >= 2:
         ratio = player.combo_timer / 90 if player.combo_timer else 0

@@ -129,15 +129,16 @@ Requires Python ≥ 3.11 (3.12 / 3.13 recommended).
 | H (on title)       | High scores           |
 | Gamepad            | A=jump, X=punch, Y=kick, B=batarang, LB/RB=slide, Start=pause |
 
-## Stages (7 in total)
+## Stages (7 main + 1 secret)
 
-1. **Gotham Streets** — clowns, knife-throwers, **rain + lightning + thunder**, midboss **Joker** (3-card fan)
-2. **Gotham Rooftops** — bottomless pits with rescue platforms; rain & lightning; lamp-post foreground
-3. **The Sewers** — green slime tiles, **water hazard** that kills on contact, pillar foreground
-4. **Ice Plaza** — fire-breather clowns, jack-in-the-boxes, **skater clowns**, snow particles, midboss **Catwoman** (lunge + jump-over)
-5. **Harbor Docks** — wooden plank ground with water gaps between piers; lamp foreground
-6. **Arkham Asylum** — dense enemy waves, no hazards, no boss — pure combat playground
-7. **Penguin's Lair** — final boss the **Penguin** in 3 phases (single shot → double + dive → triple spread, with brief umbrella shield window)
+1. **Gotham Streets** — clowns, knife-throwers, motorcycle (`CYCLE`), cannons; **rain + lightning + thunder**, midboss **Joker** (3-card fan)
+2. **Gotham Rooftops** — bottomless pits with rescue platforms; rain & lightning; lamp-post foreground; motorcycles + cannons
+3. **The Sewers** — green slime tiles, **water hazard** that kills on contact, heavy `WKLITE` clowns + cannons
+4. **Ice Plaza** — fire-breathers, jack-in-the-boxes, **skater clowns**, snow particles, midboss **Catwoman** (lunge + jump-over + whip)
+5. **Harbor Docks** — wooden plank ground with water gaps between piers; motorcycles + cannons
+6. **Arkham Asylum** — dense enemy waves, heavy `WKLITE` clowns, no hazards, no boss — pure combat playground
+7. **Penguin's Lair** — final boss the **Penguin** in 3 phases (single shot → double + dive → triple spread, brief umbrella shield window)
+8. **The Batcave** *(secret)* — only unlocked after first full clear; very dense enemy waves, every mook type
 
 Hazards (pits and water) are instant-kill if you fall in: the player respawns
 at their last safe ground position with one fewer life. Each wide hazard gets

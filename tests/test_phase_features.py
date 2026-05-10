@@ -210,7 +210,7 @@ def test_settings_reset_high_scores(tmp_path, monkeypatch) -> None:
     persistence.save(sd)
     g = create_game()
     g.state = GameState.SETTINGS
-    g.settings_cursor = 4  # reset high scores
+    g.settings_cursor = 5  # reset high scores (now slot 5, after LANGUAGE)
     g.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_RETURN}))
     assert g.save.high_scores == []
 

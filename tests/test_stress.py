@@ -133,14 +133,26 @@ def test_dead_player_eventually_triggers_game_over(game) -> None:
 
 
 def test_advance_to_victory(game) -> None:
-    """Advance through all stages by setting boss_defeated; verify VICTORY."""
+    """Advance through all stages by setting boss_defeated; verify VICTORY.
+
+    advance_stage() now opens a STAGE_CLEAR summary screen which the player
+    dismisses via commit_stage_advance(). We tick a watchdog so this can't
+    spin forever if the state machine drifts.
+    """
     from batman_returns.constants import GameState
-    while game.state is not GameState.VICTORY:
-        game.world.boss_defeated = True
-        game.advance_stage()
-        if game.state is GameState.LEVEL_INTRO:
-            for _ in range(200):
-                game.update(pygame.key.get_pressed())
+    safety = 50
+    while game.state is not GameState.VICTORY and safety > 0:
+        if game.state is GameState.STAGE_CLEAR:
+            game.commit_stage_advance()
+        elif game.state is GameState.LEVEL_INTRO:
+            game.intro_timer = 0
+            game.state = GameState.PLAYING
+        elif game.state is GameState.PLAYING:
+            game.world.boss_defeated = True
+            game.advance_stage()
+        else:
+            game.update(pygame.key.get_pressed())
+        safety -= 1
     assert game.state is GameState.VICTORY
 
 
