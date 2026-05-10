@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Self
 
 import pygame
@@ -94,6 +94,8 @@ class Player:
     next_extra_life: int = 20_000
     combo: int = 0
     combo_timer: int = 0
+    last_throw_flash: int = 0  # frames remaining of HUD batarang flash
+    charge_frames: int = 0     # how long C is held (for charged shot)
 
     W: int = 12
     H: int = 24
@@ -226,6 +228,8 @@ class Player:
                 self.state = PlayerState.IDLE
         if self.iframes > 0:
             self.iframes -= 1
+        if self.last_throw_flash > 0:
+            self.last_throw_flash -= 1
 
         # Determine animation state if not locked
         if self.state in {PlayerState.IDLE, PlayerState.WALK, PlayerState.JUMP}:
@@ -280,11 +284,12 @@ class Player:
         self.batarangs -= 1
         self.state = PlayerState.THROW
         self.state_timer = 14
+        self.last_throw_flash = 12  # HUD flash so player sees they fired
         audio.batarang().play()
         return Batarang(
             x=self.x + self.facing * 10,
             y=self.y + 8,
-            vx=4.5 * self.facing,
+            vx=3.2 * self.facing,  # slower than 4.5 so it's actually visible
         )
 
     def take_damage(self, dmg: int) -> None:
@@ -366,15 +371,25 @@ class Batarang:
     alive: bool = True
     damage: int = BATARANG_DAMAGE
     life: int = 90  # frames
+    trail: list[tuple[float, float]] = field(default_factory=list)
 
     def update(self, level: Level) -> None:
+        # Record trail position before updating
+        self.trail.append((self.x, self.y))
+        if len(self.trail) > 5:
+            self.trail.pop(0)
         self.x += self.vx
-        self.spin += 0.6
+        self.spin += 0.5
         self.life -= 1
         if self.life <= 0 or self.x < level.cam_x - 32 or self.x > level.cam_x + 360:
             self.alive = False
 
     def draw(self, surf: pygame.Surface, level: Level) -> None:
+        # Yellow afterimage trail for visibility
+        for i, (tx, ty) in enumerate(self.trail):
+            sx = level.world_to_screen(tx)
+            radius = i + 1
+            pygame.draw.circle(surf, PALETTE["yellow"], (sx, int(ty)), radius)
         img = sprites.get("batarang")
         rotated = pygame.transform.rotate(img, self.spin * 30 % 360)
         rect = rotated.get_rect(center=(level.world_to_screen(self.x), int(self.y)))
@@ -382,7 +397,7 @@ class Batarang:
 
     @property
     def hitbox(self) -> Hitbox:
-        return Hitbox(self.x - 5, self.y - 5, 10, 10)
+        return Hitbox(self.x - 7, self.y - 7, 14, 14)
 
 
 @dataclass(slots=True)

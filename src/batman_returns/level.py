@@ -242,6 +242,12 @@ class Level:
                 continue
             for col in range(plat.w // TILE_SIZE):
                 surf.blit(brick, (sx + col * TILE_SIZE, plat.y - 8))
+        # Goal flag for non-boss stages: visible target at the end of the run.
+        if not self.stage.boss:
+            flag_world_x = self.width_px - 40
+            sx = flag_world_x - int(self.cam_x)
+            if -32 < sx < NATIVE_W + 32:
+                surf.blit(sprites.get("goal_flag"), (sx, ground_y - 32))
 
     # ------------------------------------------------------------------
     def world_to_screen(self, x: float) -> int:

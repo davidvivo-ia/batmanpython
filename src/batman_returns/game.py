@@ -35,7 +35,13 @@ from .entities import (
     Player,
     random_pickup,
 )
-from .hud import draw_hud, draw_text
+from .hud import (
+    draw_goal_arrow,
+    draw_hud,
+    draw_progress_bar,
+    draw_text,
+    draw_warning_banner,
+)
 from .level import STAGES, Level
 
 
@@ -58,6 +64,9 @@ class World:
     freeze: HitFreeze = field(default_factory=HitFreeze)
     floats: FloatingTextSystem = field(default_factory=FloatingTextSystem)
     achievements: AchievementTracker = field(default_factory=AchievementTracker)
+    warning_text: str = ""
+    warning_timer: int = 0
+    frame: int = 0
 
 
 def _spawn_for_stage(world: World) -> None:
@@ -94,8 +103,11 @@ def _spawn_for_stage(world: World) -> None:
         boss_x = world.player.x + 120
         world.enemies.append(Enemy.spawn(EnemyKind.BOSS_PENGUIN, boss_x, GROUND_Y - 32))
         world.boss_spawned = True
-        audio.boss_roar().play()
+        if pygame.mixer.get_init():
+            audio.boss_roar().play()
         world.floats.emit("THE PENGUIN!", world.player.x, world.player.y - 30, PALETTE["red"])
+        world.warning_text = "WARNING - PENGUIN APPROACHES"
+        world.warning_timer = 90
 
     # Midboss spawn — pin to a fixed world position (not relative to player)
     # so a player who runs through the trigger zone doesn't shove the midboss
@@ -117,6 +129,12 @@ def _spawn_for_stage(world: World) -> None:
             audio.boss_roar().play()
         label = {"midboss_joker": "THE JOKER!", "midboss_catwoman": "CATWOMAN!"}[stage.midboss_kind]
         world.floats.emit(label, world.player.x, world.player.y - 30, PALETTE["magenta"])
+        warn = {
+            "midboss_joker": "WARNING - JOKER AHEAD",
+            "midboss_catwoman": "WARNING - CATWOMAN AHEAD",
+        }[stage.midboss_kind]
+        world.warning_text = warn
+        world.warning_timer = 90
 
 
 def _award(world: World, points: int, x: float, y: float) -> None:
@@ -256,12 +274,27 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
     world.particles.update()
     world.floats.update()
     world.achievements.update()
+    if world.warning_timer > 0:
+        world.warning_timer -= 1
+    world.frame += 1
 
     # Cleanup
     world.enemies = [e for e in world.enemies if e.alive]
     world.batarangs = [b for b in world.batarangs if b.alive]
     world.enemy_shots = [s for s in world.enemy_shots if s.alive]
     world.pickups = [pk for pk in world.pickups if pk.alive]
+
+
+def _world_objective(world: World) -> str:
+    stage = world.level.stage
+    if stage.boss:
+        return "DEFEAT THE PENGUIN" if not world.boss_defeated else "VICTORY!"
+    if stage.midboss_kind and not world.midboss_defeated:
+        return {
+            "midboss_joker": "DEFEAT THE JOKER",
+            "midboss_catwoman": "DEFEAT CATWOMAN",
+        }[stage.midboss_kind]
+    return "REACH THE FLAG >>"
 
 
 def _draw_world(surf: pygame.Surface, world: World) -> None:
@@ -277,8 +310,24 @@ def _draw_world(surf: pygame.Surface, world: World) -> None:
     world.player.draw(surf, world.level)
     world.particles.draw(surf, world.level.cam_x)
     world.floats.draw(surf, world.level.cam_x)
-    draw_hud(surf, world.player, world.level.stage.name)
+
+    # Progress bar at top-centre
+    stage = world.level.stage
+    progress = world.level.cam_x / max(1, world.level.width_px - 320)
+    midboss_marker = (stage.midboss_at_tile * 16) / world.level.width_px if stage.midboss_kind else None
+    draw_progress_bar(surf, progress, midboss_marker, midboss_alive=not world.midboss_defeated)
+
+    objective = _world_objective(world)
+    draw_hud(surf, world.player, stage.name, objective=objective)
     _draw_toasts(surf, world)
+
+    # Goal arrow on right edge during the last screen of non-boss stages
+    if not stage.boss and world.player.x > world.level.width_px - 320 * 1.5:
+        draw_goal_arrow(surf, world.frame)
+
+    # Boss / midboss warning banner
+    if world.warning_timer > 0:
+        draw_warning_banner(surf, world.warning_text, world.warning_timer)
 
 
 # ----------------------------------------------------------------------
@@ -492,6 +541,13 @@ class Game:
                         bat = p.try_throw()
                         if bat is not None:
                             self.world.batarangs.append(bat)
+                            # Launch FX so player can see the throw register.
+                            self.world.particles.emit(
+                                bat.x, bat.y,
+                                count=10, speed=2.2, life=10,
+                                color=PALETTE["yellow"],
+                            )
+                            self.world.shake.kick(1.5)
                     case pygame.K_DOWN | pygame.K_s:
                         p.try_slide()
             case GameState.PAUSED:

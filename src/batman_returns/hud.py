@@ -87,7 +87,61 @@ def ch_is_letter_safe(_text: str) -> bool:
     return True
 
 
-def draw_hud(surf: pygame.Surface, player: Player, stage_name: str) -> None:
+def draw_progress_bar(
+    surf: pygame.Surface,
+    progress: float,
+    midboss_marker: float | None,
+    midboss_alive: bool,
+) -> None:
+    """Thin horizontal bar showing camera progress through the stage."""
+    bar_x, bar_y, bar_w, bar_h = 80, 14, 160, 3
+    pygame.draw.rect(surf, PALETTE["dark"], (bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2))
+    fill = max(0.0, min(1.0, progress))
+    fill_color = PALETTE["yellow"] if fill > 0.7 else PALETTE["purple"]
+    pygame.draw.rect(surf, fill_color, (bar_x, bar_y, int(bar_w * fill), bar_h))
+    if midboss_marker is not None:
+        mx = bar_x + int(bar_w * midboss_marker)
+        # Red dot if midboss still alive, green if defeated.
+        col = PALETTE["red"] if midboss_alive else PALETTE["green"]
+        pygame.draw.rect(surf, col, (mx - 1, bar_y - 1, 3, bar_h + 2))
+    # Bat icon at the far right (the goal)
+    pygame.draw.rect(surf, PALETTE["yellow"], (bar_x + bar_w - 2, bar_y - 2, 4, bar_h + 4))
+
+
+def draw_objective(surf: pygame.Surface, text: str) -> None:
+    """Top-centre objective text under the progress bar."""
+    x = NATIVE_W // 2 - len(text) * 3
+    draw_text(surf, text, x, 22, PALETTE["white"])
+
+
+def draw_goal_arrow(surf: pygame.Surface, frame: int) -> None:
+    """Pulsing GOAL chevron on the right edge during the last screen of a stage."""
+    pulse = (frame // 15) % 2
+    offset = 0 if pulse == 0 else 2
+    x = NATIVE_W - 40 - offset
+    y = NATIVE_H // 2 - 10
+    pygame.draw.polygon(surf, PALETTE["yellow"], [(x, y), (x + 12, y + 8), (x, y + 16)])
+    pygame.draw.polygon(surf, PALETTE["black"], [(x + 2, y + 4), (x + 8, y + 8), (x + 2, y + 12)])
+    draw_text(surf, "GOAL", x - 30, y + 4, PALETTE["yellow"])
+
+
+def draw_warning_banner(surf: pygame.Surface, text: str, frames_left: int) -> None:
+    """Full-width red/yellow striped warning."""
+    if frames_left <= 0:
+        return
+    y = NATIVE_H // 2 - 14
+    # Striped background
+    for i in range(0, NATIVE_W, 8):
+        c = PALETTE["red"] if (i // 8 + frames_left // 4) % 2 == 0 else PALETTE["yellow"]
+        pygame.draw.rect(surf, c, (i, y - 2, 8, 28))
+    pygame.draw.rect(surf, PALETTE["black"], (4, y, NATIVE_W - 8, 24))
+    # Text — flicker on/off
+    if frames_left % 8 < 6:
+        text_x = NATIVE_W // 2 - len(text) * 6
+        draw_text(surf, text, text_x, y + 5, PALETTE["yellow"], scale=2)
+
+
+def draw_hud(surf: pygame.Surface, player: Player, stage_name: str, objective: str = "") -> None:
     panel_h = 24
     pygame.draw.rect(surf, PALETTE["black"], (0, NATIVE_H - panel_h, NATIVE_W, panel_h))
     pygame.draw.line(surf, PALETTE["purple"], (0, NATIVE_H - panel_h), (NATIVE_W, NATIVE_H - panel_h))
@@ -99,8 +153,15 @@ def draw_hud(surf: pygame.Surface, player: Player, stage_name: str) -> None:
     pygame.draw.rect(surf, PALETTE["yellow"], (118, NATIVE_H - panel_h + 4, 6, 6))
     pygame.draw.rect(surf, PALETTE["black"], (119, NATIVE_H - panel_h + 5, 4, 1))
 
-    # Batarangs
-    draw_text(surf, f"BAT x{player.batarangs}", 152, NATIVE_H - panel_h + 4, PALETTE["lightgray"])
+    # Batarangs — show key hint + flash on use so the player learns the binding.
+    bat_x = 152
+    bat_y = NATIVE_H - panel_h + 4
+    if player.last_throw_flash > 0:
+        # Pulsing yellow halo behind the counter
+        pygame.draw.rect(surf, PALETTE["yellow"], (bat_x - 2, bat_y - 2, 70, 11))
+        pygame.draw.rect(surf, PALETTE["black"], (bat_x - 1, bat_y - 1, 68, 9))
+    bat_color = PALETTE["yellow"] if player.batarangs > 0 else PALETTE["gray"]
+    draw_text(surf, f"[C]BAT x{player.batarangs}", bat_x, bat_y, bat_color)
 
     # Health bar
     bar_x, bar_y, bar_w, bar_h = NATIVE_W - 80, NATIVE_H - panel_h + 6, 70, 10
@@ -112,6 +173,10 @@ def draw_hud(surf: pygame.Surface, player: Player, stage_name: str) -> None:
 
     # Stage name top
     draw_text(surf, stage_name, 4, 4, PALETTE["yellow"])
+
+    # Objective text under the progress bar (if provided)
+    if objective:
+        draw_objective(surf, objective)
 
     # Combo indicator
     if player.combo >= 2:
