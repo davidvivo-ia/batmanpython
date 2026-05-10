@@ -58,7 +58,7 @@ def test_player_y_never_below_ground(game) -> None:
 def test_batarang_inventory_never_negative(game) -> None:
     """Spamming throw must not let batarang count drop below 0."""
     p = game.world.player
-    for _ in range(120):  # past intro
+    for _ in range(200):  # past intro
         game.update(pygame.key.get_pressed())
     for _ in range(100):
         p.try_throw()
@@ -92,7 +92,7 @@ def test_enemy_projectile_pool_bounded_under_boss_phase3(game, monkeypatch) -> N
 
 def test_pause_resume_preserves_game_state(game) -> None:
     from batman_returns.constants import GameState
-    for _ in range(120):
+    for _ in range(200):
         game.update(pygame.key.get_pressed())
     p = game.world.player
     cam = game.world.level.cam_x
@@ -118,7 +118,7 @@ def test_jack_in_box_activates_only_in_proximity(game) -> None:
 
 def test_dead_player_eventually_triggers_game_over(game) -> None:
     from batman_returns.constants import GameState
-    for _ in range(120):
+    for _ in range(200):
         game.update(pygame.key.get_pressed())
     p = game.world.player
     p.lives = 0
@@ -139,7 +139,7 @@ def test_advance_to_victory(game) -> None:
         game.world.boss_defeated = True
         game.advance_stage()
         if game.state is GameState.LEVEL_INTRO:
-            for _ in range(120):
+            for _ in range(200):
                 game.update(pygame.key.get_pressed())
     assert game.state is GameState.VICTORY
 

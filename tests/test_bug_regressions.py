@@ -111,7 +111,7 @@ def test_stage_with_midboss_cannot_clear_until_midboss_defeated(tmp_path, monkey
     g = create_game()
     g.new_run()
     # Pump past intro
-    for _ in range(120):
+    for _ in range(200):
         g.update(pygame.key.get_pressed())
     assert g.state is GameState.PLAYING
     # Teleport player to the right edge without defeating the midboss
@@ -137,7 +137,7 @@ def test_divekick_lands_and_eventually_returns_to_idle():
     assert p.state is PlayerState.DIVEKICK
     lvl = Level(STAGES[0])
     # Tick until grounded
-    for _ in range(120):
+    for _ in range(200):
         p.update(pygame.key.get_pressed(), lvl)
         if p.on_ground and p.state is PlayerState.IDLE:
             return

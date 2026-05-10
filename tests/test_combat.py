@@ -61,7 +61,11 @@ def test_enemy_take_damage_reports_kill() -> None:
     assert e.iframes > 0
     e.iframes = 0  # bypass i-frames for the kill check
     assert e.take_damage(9999)
-    assert not e.alive
+    # After lethal hit, the enemy enters a brief dying state (squash + fade)
+    # before alive is finally set False — combat routines treat is_dying as
+    # uncontestable.
+    assert e.is_dying
+    assert e.death_timer > 0
 
 
 def test_player_iframes_block_repeat_damage() -> None:

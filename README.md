@@ -45,18 +45,50 @@ as a future addition.
 
 ## Features beyond the original
 
-- **5 enemy archetypes** + Joker (stage 1 midboss) + Catwoman (stage 2 midboss) + multi-phase Penguin
-- **Combo system** — chained hits boost damage and score; HUD shows multiplier with draining timer
-- **Slide** (Down) with brief i-frames, **dive-kick** (Kick mid-air) for high damage
+### Combat
+- **6 enemy archetypes** (basher, jack-in-the-box, fire-breather, knife-thrower, **skater clown** on Ice Plaza, plus 3 bosses)
+- **Joker** (stage 1 midboss) + **Catwoman** (stage 2 midboss) + multi-phase **Penguin** with attack telegraphs and umbrella shield
+- **Combo system** with named milestones (`DOUBLE`, `TRIPLE`, `MEGA COMBO!`, `INSANE!`, `UNSTOPPABLE!`) — boosts damage and score
+- **Slide** (Down) with brief i-frames, **dive-kick** (Kick mid-air), **charged batarang** (hold C ≥0.75s, releases a piercing shot for free)
+- **First-blood hit-stop** — extra freeze frames + banner on the first kill of a run
+- **Smoke bomb** rare pickup wipes nearby enemies AOE
+- **Patrol → chase AI** — enemies pace at spawn until alerted by proximity or being hit
+- **Enemy death animation** — 18-frame squash + alpha fade
+
+### UX visibility (addressing player feedback)
+- **HUD batarang counter** shows `[C]BAT x5` with key hint and pulsing flash on use
+- **Stage progress bar** at top of screen with red/green midboss marker and yellow goal flag
+- **Goal flag** sprite at end of stages 1 and 2; boss arena for stage 3
+- **Pulsing GOAL ▶ chevron** on the right edge during the last screen
+- **Live objective text** under the progress bar (`DEFEAT JOKER`, `REACH THE FLAG ▶`, etc.)
+- **Striped warning banner** before each midboss / boss spawn
+- **Extended LEVEL_INTRO** (3 s) with full controls panel; skippable with any key
+- **First-run tutorial** — inline prompts walk you through MOVE / JUMP / PUNCH / RUN / BATARANG; auto-disabled after first completion
+
+### Visuals & audio
 - **Procedural platforms** — one-way (top-only) AABB collision
-- **Particle FX** — 256-slot recycled pool: hit sparks, blood bursts, landing dust, pickup confetti
+- **Stage-specific platform sprites** — brick, ice block, lair stone
+- **Foreground parallax** — lamp posts, icicles, lair pillars at 1.4× scroll
+- **Particle FX** — 256-slot recycled pool: hit sparks, blood bursts, landing dust, pickup confetti, batarang launch flash
 - **Screen shake + hit-freeze** for game-feel
-- **Floating "+500" score popups**
+- **Yellow afterimage trail** on every batarang
+- **Floating score popups** ("+500", "MEGA COMBO!", "FIRST BLOOD!")
 - **Weather** — rain + lightning + procedural thunder rumble in Gotham; snow particles in Ice Plaza
 - **Procedural chiptune music** — square-lead + triangle-bass loops, one per stage
-- **Pause menu** with SFX/Music volume cyclers
+
+### Difficulty & progression
+- **Three difficulties** (EASY / NORMAL / HARD) scaling enemy HP, contact damage, starting batarangs
+- **Continue from cleared stage** offered on title screen if you've cleared at least one
+- **Stage select** unlocked after first clear or in progress
+- **Highest cleared stage** persisted to save data
+- **10 achievements** with unlock toasts and persistence
+
+### Quality of life
+- **Pause menu** with `RESUME / CONTROLS / QUIT TO TITLE / SFX VOL / MUSIC VOL`
+- **Settings screen** from title with `DIFFICULTY / SFX VOL / MUSIC VOL / SHOW FPS / RESET HIGH SCORES`
+- **Resizable window** with letterboxed scaling (preserves 320×224 aspect)
+- **F12 screenshot** to `~/batman-returns-screenshots/<ts>.png`
 - **High-score persistence** in JSON (XDG/AppData/Application Support)
-- **10 achievements** with unlock toasts (FIRST BLOOD, COMBO MASTER, UNTOUCHABLE, GOTHAM SAVED, …)
 - **Gamepad support** — Xbox-style mapping, hot-plug, analog stick + dpad-hat
 
 ## Tests
@@ -66,8 +98,11 @@ pip install -e . pytest
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy pytest tests/ -q
 ```
 
-41 tests covering combat math, persistence round-trip, level geometry, end-to-end smoke
-runs, chaos-monkey input, and 8 regression tests for bugs caught in code review.
+58 tests covering combat math, persistence round-trip, level geometry, end-to-end smoke
+runs, chaos-monkey input, regression tests for bugs caught in code review, and Phase 1–7
+feature tests (HUD progression, tutorial activation, charged-batarang piercing, smoke-bomb
+AOE, difficulty scaling, skater motion, Penguin shield window, enemy death animation,
+settings reset, screenshot creation).
 
 ## Run it
 

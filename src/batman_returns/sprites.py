@@ -559,6 +559,34 @@ CATWOMAN_MIDBOSS = [
 ]
 
 # Penguin boss is bigger (24x32)
+SKATER_CLOWN = [
+    "....RRRR........",
+    "...RRWWRR.......",
+    "..RR.WW.RR......",
+    "..RRWWWWRR......",
+    "..WWSSSSWW......",
+    ".W.SKSSKS.W.....",
+    ".W.SSSSSS.W.....",
+    "..W.SOOS.W......",
+    "...WSSSSW.......",
+    "..NNNNWWNN......",
+    ".NNNNNNNNNN.....",
+    "NNNNNNNNNNNN....",
+    "NNNNYNNNYNNN....",
+    "NNNNNNNNNNNN....",
+    ".NNNNNNNNNN.....",
+    "..NNNN.NNNN.....",
+    "..NNNN.NNNN.....",
+    "...LLL.LLL......",
+    "..LLLLLLLLLL....",
+    "LLLLLLLLLLLLLL..",
+    "LLLLLLLLLLLLLLLL",
+    ".LLLLLLLLLLLLLL.",
+    "................",
+    "................",
+]
+
+
 PENGUIN_BOSS = [
     "........KKKKKKKK........",
     ".......KKKKKKKKKK.......",
@@ -768,6 +796,7 @@ SPRITE_REGISTRY: dict[str, list[str]] = {
     "jack_open": JACK_IN_BOX_OPEN,
     "firebreather": FIREBREATHER,
     "knifer": KNIFER,
+    "skater": SKATER_CLOWN,
     "penguin": PENGUIN_BOSS,
     "joker": JOKER_MIDBOSS,
     "catwoman": CATWOMAN_MIDBOSS,

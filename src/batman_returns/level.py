@@ -39,6 +39,8 @@ class Stage:
     boss: bool = False           # last stage spawns Penguin
     midboss_kind: str | None = None
     midboss_at_tile: int = 0
+    platform_sprite: str = "tile_brick"  # which 16x16 to use for platforms
+    foreground: str = ""          # "lamp" | "icicle" | "pillar" | ""
 
 
 STAGES: Final = (
@@ -53,6 +55,8 @@ STAGES: Final = (
         midboss_at_tile=120,
         rain=True,
         lightning=True,
+        platform_sprite="tile_brick",
+        foreground="lamp",
     ),
     Stage(
         name="ICE PLAZA",
@@ -64,6 +68,8 @@ STAGES: Final = (
         enemy_density=0.13,
         midboss_kind="midboss_catwoman",
         midboss_at_tile=140,
+        platform_sprite="tile_snow",
+        foreground="icicle",
     ),
     Stage(
         name="PENGUIN'S LAIR",
@@ -73,6 +79,8 @@ STAGES: Final = (
         sky_bot=(70, 40, 90),
         enemy_density=0.16,
         boss=True,
+        platform_sprite="tile_brick",
+        foreground="pillar",
     ),
 )
 
@@ -190,6 +198,42 @@ class Level:
         if self.stage.snow:
             for f in self.snowflakes:
                 surf.set_at((int(f[0]), int(f[1])), PALETTE["snow"])
+
+    def draw_foreground(self, surf: pygame.Surface) -> None:
+        """Foreground parallax — drawn AFTER entities so it occludes."""
+        if not self.stage.foreground:
+            return
+        ground_y = NATIVE_H - 32
+        # 1.4× parallax: things move faster than camera
+        offs = self.cam_x * 1.4
+        spacing = 96
+        first_x = -((int(offs)) % spacing)
+        for i in range(NATIVE_W // spacing + 2):
+            x = first_x + i * spacing
+            self._draw_foreground_object(surf, x, ground_y)
+
+    def _draw_foreground_object(self, surf: pygame.Surface, x: int, ground_y: int) -> None:
+        kind = self.stage.foreground
+        if kind == "lamp":
+            # Black post + glowing yellow lamp
+            pygame.draw.rect(surf, PALETTE["black"], (x + 1, ground_y - 40, 2, 40))
+            pygame.draw.rect(surf, PALETTE["yellow"], (x - 2, ground_y - 44, 8, 5))
+            pygame.draw.rect(surf, PALETTE["white"], (x - 1, ground_y - 43, 6, 3))
+        elif kind == "icicle":
+            # Ice spike hanging from top
+            pygame.draw.polygon(
+                surf, PALETTE["snow"],
+                [(x, 0), (x + 6, 0), (x + 3, 28)],
+            )
+            pygame.draw.polygon(
+                surf, PALETTE["white"],
+                [(x + 1, 0), (x + 5, 0), (x + 3, 22)],
+            )
+        elif kind == "pillar":
+            pygame.draw.rect(surf, PALETTE["dark"], (x, ground_y - 70, 6, 70))
+            pygame.draw.rect(surf, PALETTE["gray"], (x + 1, ground_y - 70, 4, 70))
+            pygame.draw.rect(surf, PALETTE["dark"], (x - 2, ground_y - 70, 10, 4))
+            pygame.draw.rect(surf, PALETTE["dark"], (x - 2, ground_y - 6, 10, 4))
         if self.stage.rain:
             for r in self.raindrops:
                 x, y = int(r[0]), int(r[1])
@@ -235,7 +279,7 @@ class Level:
             for row in range(2):
                 surf.blit(tile, (sx, ground_y + row * TILE_SIZE))
         # Real platforms
-        brick = sprites.get("tile_brick")
+        brick = sprites.get(self.stage.platform_sprite)
         for plat in self.platforms:
             sx = plat.x - int(self.cam_x)
             if sx + plat.w < 0 or sx > NATIVE_W:

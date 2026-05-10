@@ -24,7 +24,12 @@ def _config_dir() -> Path:
     return Path(base) / "batman-returns-py"
 
 
-CONFIG_PATH = _config_dir() / "save.json"
+def _config_path() -> Path:
+    return _config_dir() / "save.json"
+
+
+# Backwards-compat alias used by existing tests that monkeypatch this directly.
+CONFIG_PATH = _config_path()
 
 
 @dataclass(slots=True)
@@ -34,6 +39,11 @@ class SaveData:
     sfx_volume: float = 0.7
     fullscreen: bool = False
     unlocked: list[str] = field(default_factory=list)
+    tutorial_seen: bool = False
+    difficulty: str = "normal"             # "easy" | "normal" | "hard"
+    highest_cleared_stage: int = -1        # -1 = none cleared, 0 = stage 1, etc
+    beat_game: bool = False
+    show_fps: bool = False
 
     def push_score(self, score: int) -> bool:
         """Insert score, keep top 5. Returns True if THIS submission made the table."""
@@ -46,8 +56,9 @@ class SaveData:
 
 
 def load() -> SaveData:
+    path = _config_path()
     try:
-        raw = json.loads(CONFIG_PATH.read_text())
+        raw = json.loads(path.read_text())
         sd = SaveData()
         for k, v in raw.items():
             if hasattr(sd, k):
@@ -58,8 +69,9 @@ def load() -> SaveData:
 
 
 def save(data: SaveData) -> None:
+    path = _config_path()
     try:
-        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH.write_text(json.dumps(asdict(data), indent=2))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(asdict(data), indent=2))
     except OSError:
         pass  # best effort

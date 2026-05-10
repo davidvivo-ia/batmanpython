@@ -75,6 +75,23 @@ class GameState(StrEnum):
     VICTORY = auto()
     LEVEL_INTRO = auto()
     HIGH_SCORES = auto()
+    PAUSE_CONTROLS = auto()   # sub-screen: full controls reference
+    SETTINGS = auto()
+    STAGE_SELECT = auto()
+
+
+class Difficulty(StrEnum):
+    EASY = auto()
+    NORMAL = auto()
+    HARD = auto()
+
+
+# Multipliers per difficulty applied to enemy HP and contact damage.
+DIFFICULTY_SCALARS = {
+    "easy":   {"enemy_hp": 0.7, "enemy_dmg": 0.7, "starting_batarangs": 8},
+    "normal": {"enemy_hp": 1.0, "enemy_dmg": 1.0, "starting_batarangs": 5},
+    "hard":   {"enemy_hp": 1.5, "enemy_dmg": 1.4, "starting_batarangs": 3},
+}
 
 
 class PlayerState(StrEnum):
@@ -110,6 +127,7 @@ class EnemyKind(StrEnum):
     JACKBOX = auto()        # JACKNBOX.68K — pop-up surprise
     FIREBREATHER = auto()   # FIRETRUC.68K + MINIFIRE.68K
     KNIFER = auto()         # disc/knife thrower
+    SKATER = auto()         # Ice Plaza fast slider
     MIDBOSS_JOKER = auto()  # stage 1 midboss
     MIDBOSS_CATWOMAN = auto()  # stage 2 midboss
     BOSS_PENGUIN = auto()   # VILLAN.68K final boss

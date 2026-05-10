@@ -8,7 +8,8 @@ from batman_returns import persistence
 
 
 def test_high_score_table_keeps_top_5(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(persistence, "CONFIG_PATH", tmp_path / "save.json")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(persistence, "CONFIG_PATH", tmp_path / "batman-returns-py" / "save.json")
     sd = persistence.SaveData()
     for s in [100, 5000, 200, 9999, 1, 7777, 3333, 4444]:
         sd.push_score(s)
@@ -16,7 +17,8 @@ def test_high_score_table_keeps_top_5(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_save_load_roundtrip(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(persistence, "CONFIG_PATH", tmp_path / "save.json")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(persistence, "CONFIG_PATH", tmp_path / "batman-returns-py" / "save.json")
     a = persistence.SaveData(high_scores=[1, 2, 3], music_volume=0.3, sfx_volume=0.9)
     persistence.save(a)
     b = persistence.load()
@@ -26,7 +28,7 @@ def test_save_load_roundtrip(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_load_missing_returns_defaults(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(persistence, "CONFIG_PATH", tmp_path / "missing.json")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "fresh"))
     sd = persistence.load()
     assert sd.high_scores == []
     assert 0.0 <= sd.music_volume <= 1.0

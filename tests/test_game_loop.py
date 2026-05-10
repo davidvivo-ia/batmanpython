@@ -24,7 +24,7 @@ def test_runs_2000_frames_without_crash(game) -> None:
 
 def test_pause_blocks_world_updates(game, monkeypatch) -> None:
     # Get past intro
-    for _ in range(120):
+    for _ in range(200):
         game.update(pygame.key.get_pressed())
     from batman_returns.constants import GameState
     game.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_p}))
@@ -39,7 +39,7 @@ def test_pause_blocks_world_updates(game, monkeypatch) -> None:
 
 
 def test_death_transitions_to_game_over(game) -> None:
-    for _ in range(120):
+    for _ in range(200):
         game.update(pygame.key.get_pressed())
     from batman_returns.constants import GameState
     game.world.player.lives = 0
@@ -57,7 +57,7 @@ def test_killing_enemy_awards_score(game) -> None:
     e.hp = 1
     game.world.enemies.append(e)
     # Get past intro and into PLAYING
-    for _ in range(120):
+    for _ in range(200):
         game.update(pygame.key.get_pressed())
     p.try_punch()
     score_before = p.score

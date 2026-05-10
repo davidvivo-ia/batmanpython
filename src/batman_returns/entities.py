@@ -276,20 +276,23 @@ class Player:
             self.iframes = max(self.iframes, 8)  # brief invuln through projectiles
             audio.kick().play()
 
-    def try_throw(self) -> Batarang | None:
-        if self.batarangs <= 0:
-            return None
+    def try_throw(self, *, charged: bool = False) -> Batarang | None:
         if self.state not in {PlayerState.IDLE, PlayerState.WALK, PlayerState.JUMP}:
             return None
-        self.batarangs -= 1
+        if not charged and self.batarangs <= 0:
+            return None
+        if not charged:
+            self.batarangs -= 1
         self.state = PlayerState.THROW
         self.state_timer = 14
-        self.last_throw_flash = 12  # HUD flash so player sees they fired
+        self.last_throw_flash = 12
         audio.batarang().play()
         return Batarang(
             x=self.x + self.facing * 10,
             y=self.y + 8,
-            vx=3.2 * self.facing,  # slower than 4.5 so it's actually visible
+            vx=(4.0 if charged else 3.2) * self.facing,
+            damage=int(BATARANG_DAMAGE * (2.0 if charged else 1.0)),
+            piercing=charged,
         )
 
     def take_damage(self, dmg: int) -> None:
@@ -372,6 +375,8 @@ class Batarang:
     damage: int = BATARANG_DAMAGE
     life: int = 90  # frames
     trail: list[tuple[float, float]] = field(default_factory=list)
+    piercing: bool = False  # charged shot: keeps going after a hit
+    hit_set: set[int] = field(default_factory=set)  # ids of enemies already hit
 
     def update(self, level: Level) -> None:
         # Record trail position before updating
@@ -461,38 +466,54 @@ class Enemy:
     arena_left: float = 0.0
     arena_right: float = 0.0
     dived_this_cycle: bool = False
+    alert: bool = False           # patrol → chase trigger
+    spawn_x: float = 0.0          # patrol anchor
+    death_timer: int = 0          # frames of squash/fade after kill
+    telegraph: int = 0            # frames of pre-attack `!` indicator
+    shielded: int = 0             # frames of invuln (Penguin phase 2/3 after shot)
 
     @classmethod
-    def spawn(cls, kind: EnemyKind, x: float, y: float) -> Enemy:
+    def spawn(
+        cls, kind: EnemyKind, x: float, y: float,
+        hp_scale: float = 1.0, dmg_scale: float = 1.0,
+    ) -> Enemy:
+        def s(e: Enemy) -> Enemy:
+            e.hp = int(e.hp * hp_scale)
+            e.max_hp = int(e.max_hp * hp_scale)
+            e.contact_damage = int(e.contact_damage * dmg_scale)
+            e.spawn_x = e.x
+            return e
         match kind:
             case EnemyKind.BASHER:
-                return cls(kind, x, y, hp=40, max_hp=40, contact_damage=10)
+                return s(cls(kind, x, y, hp=40, max_hp=40, contact_damage=10))
             case EnemyKind.JACKBOX:
-                return cls(
+                return s(cls(
                     kind, x, GROUND_Y - 24, hp=20, max_hp=20,
                     activated=False, contact_damage=18, score_value=200,
-                )
+                ))
             case EnemyKind.FIREBREATHER:
-                return cls(kind, x, y, hp=60, max_hp=60, contact_damage=14)
+                return s(cls(kind, x, y, hp=60, max_hp=60, contact_damage=14))
             case EnemyKind.KNIFER:
-                return cls(kind, x, y, hp=35, max_hp=35, contact_damage=8)
+                return s(cls(kind, x, y, hp=35, max_hp=35, contact_damage=8))
+            case EnemyKind.SKATER:
+                return s(cls(kind, x, y, hp=30, max_hp=30, contact_damage=12))
             case EnemyKind.MIDBOSS_JOKER:
-                return cls(
+                return s(cls(
                     kind, x, GROUND_Y - 28, hp=180, max_hp=180,
                     W=20, H=28, contact_damage=15,
                     score_value=SCORE_MIDBOSS, boss=True,
-                )
+                ))
             case EnemyKind.MIDBOSS_CATWOMAN:
-                return cls(
+                return s(cls(
                     kind, x, GROUND_Y - 28, hp=200, max_hp=200,
                     W=16, H=28, contact_damage=14,
                     score_value=SCORE_MIDBOSS, boss=True,
-                )
+                ))
             case EnemyKind.BOSS_PENGUIN:
-                return cls(
+                return s(cls(
                     kind, x, GROUND_Y - 32, hp=400, max_hp=400, W=24, H=32,
                     contact_damage=20, score_value=SCORE_BOSS, boss=True,
-                )
+                ))
         raise ValueError(kind)
 
     @property
@@ -507,6 +528,24 @@ class Enemy:
             self.state_timer -= 1
         if self.attack_cooldown > 0:
             self.attack_cooldown -= 1
+        if self.telegraph > 0:
+            self.telegraph -= 1
+        if self.shielded > 0:
+            self.shielded -= 1
+        if self.death_timer > 0:
+            self.death_timer -= 1
+            if self.death_timer == 0:
+                self.alive = False
+            return []
+        # Patrol → chase: non-bosses gate aggressive behaviour on alert.
+        if not self.boss and not self.alert:
+            if abs(player.x - self.x) < 80:
+                self.alert = True
+            else:
+                # Idle pacing around spawn point at half speed
+                self.walk_anim += 0.05
+                self.x = self.spawn_x + math.sin(self.walk_anim) * 16
+                return []
 
         match self.kind:
             case EnemyKind.BASHER:
@@ -517,6 +556,8 @@ class Enemy:
                 proj = self._update_fire(player)
             case EnemyKind.KNIFER:
                 proj = self._update_knifer(player)
+            case EnemyKind.SKATER:
+                proj = self._update_skater(player)
             case EnemyKind.MIDBOSS_JOKER:
                 return self._update_joker_multi(player, level)
             case EnemyKind.MIDBOSS_CATWOMAN:
@@ -605,6 +646,17 @@ class Enemy:
                     vx=3.2 * self.facing, vy=-0.5,
                     sprite="knife_proj", damage=12, life=120,
                 )
+        return None
+
+    def _update_skater(self, player: Player) -> None:
+        # Slides at constant speed; commits to direction. Once committed it
+        # only flips direction at world edges (here just the spawn point).
+        speed = 3.0
+        if self.vx == 0:
+            self.vx = -speed if player.x < self.x else speed
+        self.x += self.vx
+        self.facing = Facing.LEFT if self.vx < 0 else Facing.RIGHT
+        self.walk_anim += abs(self.vx) * 0.2
         return None
 
     def _update_joker(self, player: Player, level: Level) -> EnemyProjectile | None:
@@ -727,6 +779,9 @@ class Enemy:
                 self.vy = 0
                 self.on_ground = True
 
+        # Telegraph window 30 frames before next shot
+        if self.attack_cooldown == 30 and self.phase >= 2:
+            self.telegraph = 30
         if self.attack_cooldown <= 0:
             cadence = {1: 60, 2: 42, 3: 28}[self.phase]
             self.attack_cooldown = cadence
@@ -736,6 +791,9 @@ class Enemy:
                 vx=2.6 * sign, vy=-2.0,
                 sprite="knife_proj", damage=14, life=140,
             )
+            # Phase 2/3: brief shield right after firing
+            if self.phase >= 2:
+                self.shielded = 30
             return base
         return None
 
@@ -778,16 +836,22 @@ class Enemy:
         ]
 
     # ------------------------------------------------------------------
+    @property
+    def is_dying(self) -> bool:
+        return self.alive and self.death_timer > 0
+
     def take_damage(self, dmg: int, knockback: float = 0) -> bool:
-        """Returns True if killed."""
-        if self.iframes > 0 or not self.alive:
+        """Returns True if the hit was lethal (combat routines should award score)."""
+        if self.iframes > 0 or not self.alive or self.shielded > 0 or self.is_dying:
             return False
+        self.alert = True
         self.hp -= dmg
         self.iframes = 8
         self.x += knockback
         audio.hit().play()
         if self.hp <= 0:
-            self.alive = False
+            # Stay alive during the squash-fade animation, then die.
+            self.death_timer = 18
             return True
         return False
 
@@ -805,9 +869,29 @@ class Enemy:
             tinted = img.copy()
             tinted.fill((255, 80, 80, 0), special_flags=pygame.BLEND_RGBA_ADD)
             img = tinted
+        # Penguin shielded — white outline halo
+        if self.shielded > 0:
+            halo = img.copy()
+            halo.fill((180, 180, 255, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            img = halo
         sx = level.world_to_screen(self.x) - img.get_width() // 2
         sy = int(self.y)
+        # Death squash + fade
+        if self.is_dying:
+            t = self.death_timer / 18  # 1 → 0
+            new_h = max(2, int(img.get_height() * (0.4 + 0.6 * t)))
+            new_w = int(img.get_width() * (1.2 - 0.2 * t))
+            img = pygame.transform.scale(img, (new_w, new_h))
+            img.set_alpha(int(255 * t))
+            sy = int(self.y) + (img.get_height() - new_h) // 2 + (24 - new_h)
+            sx = level.world_to_screen(self.x) - img.get_width() // 2
         surf.blit(img, (sx, sy))
+        # Telegraph `!` over head (bosses)
+        if self.telegraph > 0 and self.telegraph % 4 < 3:
+            tx = level.world_to_screen(self.x)
+            ty = int(self.y) - 14
+            pygame.draw.rect(surf, PALETTE["red"], (tx - 1, ty, 3, 8))
+            pygame.draw.rect(surf, PALETTE["red"], (tx - 1, ty + 10, 3, 3))
         # Boss healthbar
         if self.boss:
             self._draw_boss_hp(surf)
@@ -822,6 +906,8 @@ class Enemy:
                 return "firebreather"
             case EnemyKind.KNIFER:
                 return "knifer"
+            case EnemyKind.SKATER:
+                return "skater"
             case EnemyKind.MIDBOSS_JOKER:
                 return "joker"
             case EnemyKind.MIDBOSS_CATWOMAN:
@@ -872,6 +958,8 @@ class Pickup:
                 player.hp = min(PLAYER_MAX_HP, player.hp + 40)
             case "1up":
                 player.lives += 1
+            case "smoke":
+                pass  # AOE applied by game.py once it sees the pickup landed
         audio.pickup().play()
         self.alive = False
 
@@ -889,13 +977,19 @@ class Pickup:
                 pygame.draw.rect(surf, PALETTE["white"], (sx - 4, sy - 1, 8, 2))
             case "1up":
                 pygame.draw.rect(surf, PALETTE["green"], (sx - 6, sy - 5, 12, 10))
+            case "smoke":
+                pygame.draw.circle(surf, PALETTE["gray"], (sx, sy), 6)
+                pygame.draw.circle(surf, PALETTE["lightgray"], (sx - 2, sy - 1), 3)
+                pygame.draw.circle(surf, PALETTE["white"], (sx + 2, sy + 1), 2)
 
 
 def random_pickup(x: float, rng: random.Random | None = None) -> Pickup:
     rng = rng or random
     roll = rng.random()
-    if roll < 0.55:
+    if roll < 0.50:
         return Pickup("health", x, GROUND_Y - 8)
-    if roll < 0.9:
+    if roll < 0.83:
         return Pickup("batarang", x, GROUND_Y - 8)
-    return Pickup("1up", x, GROUND_Y - 8)
+    if roll < 0.96:
+        return Pickup("1up", x, GROUND_Y - 8)
+    return Pickup("smoke", x, GROUND_Y - 8)

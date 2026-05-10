@@ -10,6 +10,7 @@ import pygame
 from . import audio, music, persistence, sprites
 from .achievements import AchievementTracker
 from .constants import (
+    DIFFICULTY_SCALARS,
     EXTRA_LIFE_AT,
     FPS,
     GROUND_Y,
@@ -17,7 +18,6 @@ from .constants import (
     NATIVE_W,
     PALETTE,
     PLAYER_MAX_HP,
-    STARTING_BATARANGS,
     STARTING_LIVES,
     TILE_SIZE,
     WINDOW_H,
@@ -67,6 +67,8 @@ class World:
     warning_text: str = ""
     warning_timer: int = 0
     frame: int = 0
+    difficulty: str = "normal"
+    first_kill_done: bool = False
 
 
 def _spawn_for_stage(world: World) -> None:
@@ -74,6 +76,9 @@ def _spawn_for_stage(world: World) -> None:
     stage = world.level.stage
     cam_tile = int(world.level.cam_x // TILE_SIZE)
     edge_tile = cam_tile + NATIVE_W // TILE_SIZE + 4
+    scalars = DIFFICULTY_SCALARS[world.difficulty]
+    hp_scale = scalars["enemy_hp"]
+    dmg_scale = scalars["enemy_dmg"]
     while world.spawn_index < edge_tile and world.spawn_index < stage.length_tiles:
         tx = world.spawn_index
         world.spawn_index += 1
@@ -82,17 +87,22 @@ def _spawn_for_stage(world: World) -> None:
         if tx > stage.length_tiles - 16 and stage.boss:
             break  # save boss arena
         if world.rng.random() < stage.enemy_density:
-            kind = world.rng.choices(
-                population=[
-                    EnemyKind.BASHER,
-                    EnemyKind.JACKBOX,
-                    EnemyKind.FIREBREATHER,
+            # Stage-specific roster: skaters appear only on Ice Plaza.
+            if stage.snow:
+                population = [
+                    EnemyKind.BASHER, EnemyKind.JACKBOX, EnemyKind.FIREBREATHER,
+                    EnemyKind.KNIFER, EnemyKind.SKATER,
+                ]
+                weights = [4, 1, 2, 2, 3]
+            else:
+                population = [
+                    EnemyKind.BASHER, EnemyKind.JACKBOX, EnemyKind.FIREBREATHER,
                     EnemyKind.KNIFER,
-                ],
-                weights=[5, 2, 2, 3],
-            )[0]
+                ]
+                weights = [5, 2, 2, 3]
+            kind = world.rng.choices(population=population, weights=weights)[0]
             wx = tx * TILE_SIZE + 8
-            world.enemies.append(Enemy.spawn(kind, wx, GROUND_Y - 24))
+            world.enemies.append(Enemy.spawn(kind, wx, GROUND_Y - 24, hp_scale, dmg_scale))
         # Pickup chance
         if world.rng.random() < 0.04:
             wx = tx * TILE_SIZE + 8
@@ -101,7 +111,9 @@ def _spawn_for_stage(world: World) -> None:
     # Boss spawn at end of last stage
     if stage.boss and not world.boss_spawned and world.player.x > (stage.length_tiles - 18) * TILE_SIZE:
         boss_x = world.player.x + 120
-        world.enemies.append(Enemy.spawn(EnemyKind.BOSS_PENGUIN, boss_x, GROUND_Y - 32))
+        world.enemies.append(Enemy.spawn(
+            EnemyKind.BOSS_PENGUIN, boss_x, GROUND_Y - 32, hp_scale, dmg_scale,
+        ))
         world.boss_spawned = True
         if pygame.mixer.get_init():
             audio.boss_roar().play()
@@ -120,7 +132,7 @@ def _spawn_for_stage(world: World) -> None:
         kind = EnemyKind(stage.midboss_kind)
         boss_world_x = (stage.midboss_at_tile + 8) * TILE_SIZE
         boss_world_x = min(boss_world_x, stage.length_tiles * TILE_SIZE - 32)
-        world.enemies.append(Enemy.spawn(kind, boss_world_x, GROUND_Y - 28))
+        world.enemies.append(Enemy.spawn(kind, boss_world_x, GROUND_Y - 28, hp_scale, dmg_scale))
         world.midboss_spawned = True
         # Skip the spawn cursor past the midboss arena so we don't dump mooks
         # on top of the boss fight.
@@ -149,6 +161,24 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
     hp_before = p.hp
     was_on_ground = p.on_ground
     was_divekick = p.state is PlayerState.DIVEKICK
+    # Charged batarang: hold C, on release if held >=45 frames fire piercing.
+    held = bool(keys[pygame.K_c] or keys[pygame.K_l])
+    if held:
+        p.charge_frames = min(p.charge_frames + 1, 90)
+        if p.charge_frames == 45:
+            world.particles.emit(p.x, p.y + 8, count=4, speed=0.6, life=20,
+                                 color=PALETTE["yellow"])
+    elif p.charge_frames >= 45:
+        bat = p.try_throw(charged=True)
+        if bat is not None:
+            world.batarangs.append(bat)
+            world.particles.emit(bat.x, bat.y, count=14, speed=2.6, life=14,
+                                 color=PALETTE["yellow"])
+            world.shake.kick(2.5)
+            world.floats.emit("CHARGED!", p.x, p.y - 16, PALETTE["yellow"])
+        p.charge_frames = 0
+    else:
+        p.charge_frames = 0
     p.update(keys, world.level)
     # Landing dust
     if not was_on_ground and p.on_ground:
@@ -184,7 +214,7 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
         dmg = p.attack_damage
         any_hit = False
         for e in world.enemies:
-            if e.alive and atk.intersects(e.hitbox):
+            if e.alive and not e.is_dying and atk.intersects(e.hitbox):
                 any_hit = True
                 kb = 4.0 * p.facing
                 cx, cy = e.x, e.y + e.H / 2
@@ -196,7 +226,12 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
                     _award(world, pts, e.x, e.y)
                     world.particles.burst_blood(cx, cy, dir_sign=p.facing)
                     world.shake.kick(5.0)
-                    world.freeze.kick(3 if not e.boss else 8)
+                    if not world.first_kill_done:
+                        world.first_kill_done = True
+                        world.freeze.kick(10)  # extra hit-stop on the first kill
+                        world.floats.emit("FIRST BLOOD!", e.x, e.y - 16, PALETTE["yellow"])
+                    else:
+                        world.freeze.kick(3 if not e.boss else 8)
                     world.achievements.on_kill(was_batarang=False, was_divekick=was_divekick)
                     if e.kind is EnemyKind.BOSS_PENGUIN:
                         world.boss_defeated = True
@@ -210,7 +245,10 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
         if any_hit:
             p.register_combo_hit()
             world.achievements.on_combo(p.combo)
-            if p.combo >= 3:
+            combo_name = {2: "DOUBLE", 3: "TRIPLE", 5: "MEGA COMBO!", 7: "INSANE!", 10: "UNSTOPPABLE!"}.get(p.combo)
+            if combo_name:
+                world.floats.emit(combo_name, p.x, p.y - 20, PALETTE["yellow"])
+            elif p.combo >= 4:
                 world.floats.emit(f"{p.combo}X COMBO!", p.x, p.y - 20, PALETTE["yellow"])
 
     # Batarang vs enemies
@@ -218,25 +256,30 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
         if not b.alive:
             continue
         for e in world.enemies:
-            if e.alive and b.hitbox.intersects(e.hitbox):
-                cx, cy = e.x, e.y + e.H / 2
-                world.particles.spark(cx, cy, PALETTE["white"])
-                killed = e.take_damage(b.damage, knockback=2.0 * (1 if b.vx > 0 else -1))
-                if killed:
-                    _award(world, e.score_value, e.x, e.y)
-                    world.particles.burst_blood(cx, cy, dir_sign=1 if b.vx > 0 else -1)
-                    world.shake.kick(4.0)
-                    world.freeze.kick(3 if not e.boss else 8)
-                    world.achievements.on_kill(was_batarang=True, was_divekick=False)
-                    if e.kind is EnemyKind.BOSS_PENGUIN:
-                        world.boss_defeated = True
-                        world.achievements.on_boss_killed("boss_penguin")
-                    elif e.kind is EnemyKind.MIDBOSS_JOKER:
-                        world.midboss_defeated = True
-                        world.achievements.on_boss_killed("boss_joker")
-                    elif e.kind is EnemyKind.MIDBOSS_CATWOMAN:
-                        world.midboss_defeated = True
-                        world.achievements.on_boss_killed("boss_catwoman")
+            if not (e.alive and not e.is_dying and b.hitbox.intersects(e.hitbox)):
+                continue
+            if id(e) in b.hit_set:
+                continue  # already hit this enemy on a piercing shot
+            b.hit_set.add(id(e))
+            cx, cy = e.x, e.y + e.H / 2
+            world.particles.spark(cx, cy, PALETTE["white"])
+            killed = e.take_damage(b.damage, knockback=2.0 * (1 if b.vx > 0 else -1))
+            if killed:
+                _award(world, e.score_value, e.x, e.y)
+                world.particles.burst_blood(cx, cy, dir_sign=1 if b.vx > 0 else -1)
+                world.shake.kick(4.0)
+                world.freeze.kick(3 if not e.boss else 8)
+                world.achievements.on_kill(was_batarang=True, was_divekick=False)
+                if e.kind is EnemyKind.BOSS_PENGUIN:
+                    world.boss_defeated = True
+                    world.achievements.on_boss_killed("boss_penguin")
+                elif e.kind is EnemyKind.MIDBOSS_JOKER:
+                    world.midboss_defeated = True
+                    world.achievements.on_boss_killed("boss_joker")
+                elif e.kind is EnemyKind.MIDBOSS_CATWOMAN:
+                    world.midboss_defeated = True
+                    world.achievements.on_boss_killed("boss_catwoman")
+            if not b.piercing:
                 b.alive = False
                 break
 
@@ -244,7 +287,7 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
     # Only one damage event per frame; iframes are still respected by take_damage.
     if p.iframes <= 0:
         for e in world.enemies:
-            if e.alive and e.hitbox.intersects(p.hitbox):
+            if e.alive and not e.is_dying and e.hitbox.intersects(p.hitbox):
                 p.take_damage(e.contact_damage)
                 world.particles.burst_blood(p.x, p.y + 8, dir_sign=-p.facing)
                 world.shake.kick(4.0)
@@ -261,9 +304,30 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
     for pk in world.pickups:
         if pk.alive and pk.hitbox.intersects(p.hitbox):
             world.particles.emit(pk.x, pk.y, count=10, color=PALETTE["green"], speed=2.0, life=18)
-            label = {"health": "HEALTH", "batarang": "+3 BAT", "1up": "1UP"}[pk.kind]
+            label = {
+                "health": "HEALTH",
+                "batarang": "+3 BAT",
+                "1up": "1UP",
+                "smoke": "SMOKE BOMB!",
+            }[pk.kind]
             world.floats.emit(label, pk.x, pk.y, PALETTE["green"])
             pk.apply(p)
+            if pk.kind == "smoke":
+                # AOE: damage all non-boss enemies on screen.
+                for e in world.enemies:
+                    if not e.alive or e.boss or e.is_dying:
+                        continue
+                    if abs(e.x - p.x) < 160 and abs(e.y - p.y) < 80:
+                        e.iframes = 0
+                        if e.take_damage(999):
+                            _award(world, e.score_value, e.x, e.y)
+                # Big visual smoke
+                for _ in range(40):
+                    world.particles.emit(
+                        p.x, p.y + 8, count=1, speed=3.5, life=30,
+                        color=PALETTE["lightgray"], gravity=-0.05,
+                    )
+                world.shake.kick(6.0)
 
     # Track damage taken for "no damage" achievement
     if p.hp < hp_before:
@@ -310,6 +374,8 @@ def _draw_world(surf: pygame.Surface, world: World) -> None:
     world.player.draw(surf, world.level)
     world.particles.draw(surf, world.level.cam_x)
     world.floats.draw(surf, world.level.cam_x)
+    # Foreground parallax (drawn after entities so lamps/icicles occlude)
+    world.level.draw_foreground(surf)
 
     # Progress bar at top-centre
     stage = world.level.stage
@@ -328,6 +394,21 @@ def _draw_world(surf: pygame.Surface, world: World) -> None:
     # Boss / midboss warning banner
     if world.warning_timer > 0:
         draw_warning_banner(surf, world.warning_text, world.warning_timer)
+
+
+def _draw_tutorial(surf: pygame.Surface, text: str, frame: int) -> None:
+    if not text:
+        return
+    # Bottom-of-screen prompt with subtle blink
+    alpha = 200 if (frame // 6) % 2 == 0 else 160
+    box_w = len(text) * 6 + 24
+    box_x = NATIVE_W // 2 - box_w // 2
+    box_y = NATIVE_H - 56
+    overlay = pygame.Surface((box_w, 18), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, alpha))
+    surf.blit(overlay, (box_x, box_y))
+    pygame.draw.rect(surf, PALETTE["yellow"], (box_x, box_y, box_w, 18), 1)
+    draw_text(surf, text, box_x + 12, box_y + 6, PALETTE["white"])
 
 
 # ----------------------------------------------------------------------
@@ -393,9 +474,10 @@ def _draw_pause(surf: pygame.Surface, cursor: int, sfx_vol: float, music_vol: fl
     overlay = pygame.Surface((NATIVE_W, NATIVE_H), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 170))
     surf.blit(overlay, (0, 0))
-    draw_text(surf, "PAUSED", NATIVE_W // 2 - 30, NATIVE_H // 2 - 60, PALETTE["yellow"], scale=2)
+    draw_text(surf, "PAUSED", NATIVE_W // 2 - 30, NATIVE_H // 2 - 70, PALETTE["yellow"], scale=2)
     items = [
         "RESUME",
+        "CONTROLS",
         "QUIT TO TITLE",
         f"SFX VOL {int(sfx_vol * 100):3d}",
         f"MUSIC VOL {int(music_vol * 100):3d}",
@@ -403,7 +485,82 @@ def _draw_pause(surf: pygame.Surface, cursor: int, sfx_vol: float, music_vol: fl
     for i, label in enumerate(items):
         col = PALETTE["yellow"] if i == cursor else PALETTE["lightgray"]
         prefix = "> " if i == cursor else "  "
-        draw_text(surf, prefix + label, NATIVE_W // 2 - 60, NATIVE_H // 2 - 20 + i * 14, col)
+        draw_text(surf, prefix + label, NATIVE_W // 2 - 60, NATIVE_H // 2 - 30 + i * 14, col)
+
+
+def _draw_title_menu(surf: pygame.Surface, items: list[str], cursor: int) -> None:
+    y = NATIVE_H - 40 - len(items) * 12
+    for i, label in enumerate(items):
+        col = PALETTE["yellow"] if i == cursor else PALETTE["lightgray"]
+        prefix = "> " if i == cursor else "  "
+        x = NATIVE_W // 2 - 50
+        draw_text(surf, prefix + label, x, y + i * 12, col)
+
+
+def _draw_controls_screen(surf: pygame.Surface) -> None:
+    """Full controls reference, reachable from pause menu."""
+    overlay = pygame.Surface((NATIVE_W, NATIVE_H), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 200))
+    surf.blit(overlay, (0, 0))
+    draw_text(surf, "CONTROLS", NATIVE_W // 2 - 36, 16, PALETTE["yellow"], scale=2)
+
+    rows = [
+        ("ARROWS / WASD", "MOVE"),
+        ("SHIFT", "RUN"),
+        ("SPACE / UP", "JUMP"),
+        ("Z / J", "PUNCH"),
+        ("X / K", "KICK (AIR = DIVE)"),
+        ("C / L", "BATARANG (HOLD = CHARGE)"),
+        ("DOWN / S", "SLIDE"),
+        ("P / ESC", "PAUSE"),
+        ("PAD A", "JUMP"),
+        ("PAD X", "PUNCH"),
+        ("PAD Y", "KICK"),
+        ("PAD B", "BATARANG"),
+        ("PAD LB/RB", "SLIDE"),
+    ]
+    y = 56
+    for k, v in rows:
+        draw_text(surf, k, 36, y, PALETTE["yellow"])
+        draw_text(surf, v, 168, y, PALETTE["lightgray"])
+        y += 12
+    draw_text(surf, "ESC TO RETURN", NATIVE_W // 2 - 40, NATIVE_H - 16, PALETTE["gray"])
+
+
+def _draw_settings(surf: pygame.Surface, save: persistence.SaveData, cursor: int) -> None:
+    overlay = pygame.Surface((NATIVE_W, NATIVE_H), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 200))
+    surf.blit(overlay, (0, 0))
+    draw_text(surf, "SETTINGS", NATIVE_W // 2 - 36, 24, PALETTE["yellow"], scale=2)
+    items = [
+        f"DIFFICULTY    {save.difficulty.upper()}",
+        f"SFX VOLUME    {int(save.sfx_volume * 100):3d}",
+        f"MUSIC VOLUME  {int(save.music_volume * 100):3d}",
+        f"SHOW FPS      {'ON' if save.show_fps else 'OFF'}",
+        "RESET HIGH SCORES",
+        "BACK",
+    ]
+    for i, label in enumerate(items):
+        col = PALETTE["yellow"] if i == cursor else PALETTE["lightgray"]
+        prefix = "> " if i == cursor else "  "
+        draw_text(surf, prefix + label, 60, 70 + i * 16, col)
+    draw_text(surf, "UP/DOWN MOVE  ENTER CHANGE  ESC BACK", 16, NATIVE_H - 16, PALETTE["gray"])
+
+
+def _draw_stage_select(surf: pygame.Surface, save: persistence.SaveData, cursor: int) -> None:
+    overlay = pygame.Surface((NATIVE_W, NATIVE_H), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 220))
+    surf.blit(overlay, (0, 0))
+    draw_text(surf, "STAGE SELECT", NATIVE_W // 2 - 50, 30, PALETTE["yellow"], scale=2)
+    names = ["1. GOTHAM STREETS", "2. ICE PLAZA", "3. PENGUIN'S LAIR"]
+    max_unlocked = (save.highest_cleared_stage + 1) if not save.beat_game else 2
+    for i, name in enumerate(names):
+        unlocked = i <= max_unlocked
+        col = PALETTE["yellow"] if i == cursor else (PALETTE["lightgray"] if unlocked else PALETTE["gray"])
+        prefix = "> " if i == cursor else "  "
+        suffix = "" if unlocked else "  [LOCKED]"
+        draw_text(surf, prefix + name + suffix, 70, 80 + i * 16, col)
+    draw_text(surf, "ENTER START  ESC BACK", NATIVE_W // 2 - 60, NATIVE_H - 16, PALETTE["gray"])
 
 
 def _draw_high_scores(surf: pygame.Surface, scores: list[int]) -> None:
@@ -416,12 +573,46 @@ def _draw_high_scores(surf: pygame.Surface, scores: list[int]) -> None:
     draw_text(surf, "ENTER TO RETURN", NATIVE_W // 2 - 50, NATIVE_H - 24, PALETTE["gray"])
 
 
-def _draw_intro(surf: pygame.Surface, level: Level, blink: int) -> None:
+def _stage_objective_line(stage_idx: int) -> str:
+    return [
+        "OBJECTIVE: DEFEAT JOKER, REACH THE FLAG",
+        "OBJECTIVE: DEFEAT CATWOMAN, REACH THE FLAG",
+        "OBJECTIVE: DEFEAT THE PENGUIN",
+    ][stage_idx]
+
+
+def _draw_intro(surf: pygame.Surface, level: Level, blink: int, stage_idx: int) -> None:
     surf.fill(PALETTE["black"])
-    draw_text(surf, "STAGE", NATIVE_W // 2 - 24, NATIVE_H // 2 - 30, PALETTE["lightgray"])
-    draw_text(surf, level.stage.name, NATIVE_W // 2 - len(level.stage.name) * 6, NATIVE_H // 2, PALETTE["yellow"], scale=2)
+    draw_text(surf, f"STAGE {stage_idx + 1}", NATIVE_W // 2 - 30, 40, PALETTE["lightgray"])
+    name_x = NATIVE_W // 2 - len(level.stage.name) * 6
+    draw_text(surf, level.stage.name, name_x, 60, PALETTE["yellow"], scale=2)
+    obj = _stage_objective_line(stage_idx)
+    draw_text(surf, obj, NATIVE_W // 2 - len(obj) * 3, 90, PALETTE["white"])
+
+    # Controls panel (boxed)
+    box_y = 110
+    pygame.draw.rect(surf, PALETTE["dark"], (24, box_y, NATIVE_W - 48, 70))
+    pygame.draw.rect(surf, PALETTE["purple"], (24, box_y, NATIVE_W - 48, 70), 1)
+    draw_text(surf, "CONTROLS", NATIVE_W // 2 - 24, box_y + 4, PALETTE["yellow"])
+    lines = [
+        ("ARROWS", "MOVE"),
+        ("SPACE", "JUMP"),
+        ("Z", "PUNCH"),
+        ("X", "KICK / DIVE-KICK"),
+        ("C", "BATARANG"),
+        ("DOWN", "SLIDE"),
+        ("SHIFT", "RUN"),
+    ]
+    for i, (k, label) in enumerate(lines):
+        col = i % 2
+        row = i // 2
+        x = 32 + col * 144
+        y = box_y + 18 + row * 12
+        draw_text(surf, k, x, y, PALETTE["yellow"])
+        draw_text(surf, label, x + 30, y, PALETTE["lightgray"])
+
     if blink % 60 < 40:
-        draw_text(surf, "GO!", NATIVE_W // 2 - 6, NATIVE_H // 2 + 30, PALETTE["white"])
+        draw_text(surf, "GO!", NATIVE_W // 2 - 6, NATIVE_H - 24, PALETTE["white"], scale=2)
 
 
 # ----------------------------------------------------------------------
@@ -442,21 +633,65 @@ class Game:
     save: persistence.SaveData = field(default_factory=persistence.load)
     pause_cursor: int = 0
     score_recorded: bool = False
+    settings_cursor: int = 0
+    stage_select_cursor: int = 0
+    title_cursor: int = 0
+    fps_history: list[float] = field(default_factory=list)
+    tutorial_step: int = 0
+    tutorial_text: str = ""
+    tutorial_timer: int = 0
+    tutorial_seen_first_enemy: bool = False
+    tutorial_active: bool = False
 
-    def new_run(self) -> None:
-        self.stage_idx = 0
+    def _title_items(self) -> list[str]:
+        items = ["NEW GAME"]
+        if self.save.highest_cleared_stage >= 0 and self.save.highest_cleared_stage < 2:
+            items.append("CONTINUE")
+        if self.save.beat_game or self.save.highest_cleared_stage >= 0:
+            items.append("STAGE SELECT")
+        items.extend(["SETTINGS", "HIGH SCORES", "QUIT"])
+        return items
+
+    def _title_select(self, item: str) -> None:
+        match item:
+            case "NEW GAME":
+                self.new_run()
+            case "CONTINUE":
+                next_stage = self.save.highest_cleared_stage + 1
+                self.new_run(starting_stage=max(0, min(next_stage, 2)))
+            case "STAGE SELECT":
+                self.state = GameState.STAGE_SELECT
+                self.stage_select_cursor = 0
+            case "SETTINGS":
+                self.state = GameState.SETTINGS
+                self.settings_cursor = 0
+            case "HIGH SCORES":
+                self.state = GameState.HIGH_SCORES
+            case "QUIT":
+                persistence.save(self.save)
+                pygame.event.post(pygame.event.Event(pygame.QUIT))
+
+    def new_run(self, starting_stage: int = 0) -> None:
+        self.stage_idx = starting_stage
         self.world = self._make_world(carry=None, carry_tracker=None)
         # Restore previously unlocked achievements (no toasts on restore)
         self.world.achievements.unlocked = set(self.save.unlocked)
         self.world.achievements.reset_for_stage(self.world.player.hp)
         self.state = GameState.LEVEL_INTRO
-        self.intro_timer = 90
+        self.intro_timer = 180  # 3 seconds — long enough to read the controls
         self.score_recorded = False
+        # Tutorial: only on the first-ever run from stage 0
+        if not self.save.tutorial_seen and starting_stage == 0:
+            self.tutorial_active = True
+            self.tutorial_step = 0
+        else:
+            self.tutorial_active = False
         music.set_volume(self.save.music_volume)
         music.play_stage(self.stage_idx)
 
     def _make_world(self, carry: Player | None, carry_tracker: AchievementTracker | None) -> World:
         level = Level(STAGES[self.stage_idx])
+        scalars = DIFFICULTY_SCALARS[self.save.difficulty]
         if carry is not None:
             player = carry
             player.x = 32
@@ -467,10 +702,10 @@ class Game:
             player = Player(
                 x=32, y=GROUND_Y - 24,
                 hp=PLAYER_MAX_HP, lives=STARTING_LIVES,
-                batarangs=STARTING_BATARANGS,
+                batarangs=int(scalars["starting_batarangs"]),
                 next_extra_life=EXTRA_LIFE_AT,
             )
-        w = World(level=level, player=player)
+        w = World(level=level, player=player, difficulty=self.save.difficulty)
         if carry_tracker is not None:
             w.achievements = carry_tracker
         return w
@@ -479,10 +714,13 @@ class Game:
         assert self.world is not None
         # Check the per-stage "no damage" achievement
         self.world.achievements.on_stage_clear()
-        # Persist any new unlocks
+        # Persist any new unlocks + record highest cleared stage
         self.save.unlocked = sorted(self.world.achievements.unlocked)
+        self.save.highest_cleared_stage = max(self.save.highest_cleared_stage, self.stage_idx)
         persistence.save(self.save)
         if self.stage_idx + 1 >= len(STAGES):
+            self.save.beat_game = True
+            persistence.save(self.save)
             self.state = GameState.VICTORY
             music.stop()
             return
@@ -491,7 +729,7 @@ class Game:
         self.world = self._make_world(carry=self.world.player, carry_tracker=prev_tracker)
         self.world.achievements.reset_for_stage(self.world.player.hp)
         self.state = GameState.LEVEL_INTRO
-        self.intro_timer = 90
+        self.intro_timer = 180
         music.play_stage(self.stage_idx)
 
     # ------------------------------------------------------------------
@@ -499,6 +737,12 @@ class Game:
         if event.type == pygame.QUIT:
             persistence.save(self.save)
             return False
+        if event.type == pygame.VIDEORESIZE:
+            # Re-create screen at new size (preserves RESIZABLE flag).
+            self.screen = pygame.display.set_mode(
+                (event.w, event.h), pygame.RESIZABLE,
+            )
+            return True
         # Translate joystick into keyboard-equivalents
         if event.type == pygame.JOYBUTTONDOWN:
             event = _pad_to_key(event)
@@ -512,11 +756,20 @@ class Game:
             return True
         if event.type != pygame.KEYDOWN:
             return True
+        # Global screenshot hotkey (works in any state)
+        if event.key == pygame.K_F12:
+            _save_screenshot(self.canvas)
+            return True
 
         match self.state:
             case GameState.TITLE:
-                if event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
-                    self.new_run()
+                items = self._title_items()
+                if event.key in {pygame.K_UP, pygame.K_w}:
+                    self.title_cursor = (self.title_cursor - 1) % len(items)
+                elif event.key in {pygame.K_DOWN, pygame.K_s}:
+                    self.title_cursor = (self.title_cursor + 1) % len(items)
+                elif event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
+                    self._title_select(items[self.title_cursor])
                 elif event.key == pygame.K_h:
                     self.state = GameState.HIGH_SCORES
                 elif event.key == pygame.K_ESCAPE:
@@ -525,6 +778,18 @@ class Game:
             case GameState.HIGH_SCORES:
                 if event.key in {pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER}:
                     self.state = GameState.TITLE
+            case GameState.LEVEL_INTRO:
+                # Skip intro with any key (after a brief minimum read time).
+                if self.intro_timer < 150:  # require at least 30 frames of view
+                    self.intro_timer = 0
+                    self.state = GameState.PLAYING
+            case GameState.SETTINGS:
+                self._handle_settings_key(event)
+            case GameState.STAGE_SELECT:
+                self._handle_stage_select_key(event)
+            case GameState.PAUSE_CONTROLS:
+                if event.key in {pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER}:
+                    self.state = GameState.PAUSED
             case GameState.PLAYING if self.world is not None:
                 p = self.world.player
                 match event.key:
@@ -552,21 +817,23 @@ class Game:
                         p.try_slide()
             case GameState.PAUSED:
                 if event.key in {pygame.K_UP, pygame.K_w}:
-                    self.pause_cursor = (self.pause_cursor - 1) % 4
+                    self.pause_cursor = (self.pause_cursor - 1) % 5
                 elif event.key in {pygame.K_DOWN, pygame.K_s}:
-                    self.pause_cursor = (self.pause_cursor + 1) % 4
+                    self.pause_cursor = (self.pause_cursor + 1) % 5
                 elif event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
                     if self.pause_cursor == 0:
                         self.state = GameState.PLAYING
-                    elif self.pause_cursor == 1:  # quit to title
+                    elif self.pause_cursor == 1:
+                        self.state = GameState.PAUSE_CONTROLS
+                    elif self.pause_cursor == 2:  # quit to title
                         self._record_score()
                         music.stop()
                         self.state = GameState.TITLE
-                    elif self.pause_cursor == 2:  # toggle SFX volume
+                    elif self.pause_cursor == 3:
                         self.save.sfx_volume = round((self.save.sfx_volume + 0.25) % 1.25, 2)
                         audio.set_sfx_volume(self.save.sfx_volume)
                         persistence.save(self.save)
-                    elif self.pause_cursor == 3:  # toggle Music volume
+                    elif self.pause_cursor == 4:
                         self.save.music_volume = round((self.save.music_volume + 0.25) % 1.25, 2)
                         music.set_volume(self.save.music_volume)
                         persistence.save(self.save)
@@ -580,6 +847,80 @@ class Game:
                     self._record_score()
                     self.state = GameState.TITLE
         return True
+
+    def _handle_settings_key(self, event: pygame.event.Event) -> None:
+        n = 6
+        if event.key in {pygame.K_UP, pygame.K_w}:
+            self.settings_cursor = (self.settings_cursor - 1) % n
+        elif event.key in {pygame.K_DOWN, pygame.K_s}:
+            self.settings_cursor = (self.settings_cursor + 1) % n
+        elif event.key in {pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_RIGHT}:
+            match self.settings_cursor:
+                case 0:  # difficulty cycle
+                    diffs = ["easy", "normal", "hard"]
+                    i = (diffs.index(self.save.difficulty) + 1) % 3
+                    self.save.difficulty = diffs[i]
+                case 1:  # SFX
+                    self.save.sfx_volume = round((self.save.sfx_volume + 0.25) % 1.25, 2)
+                    audio.set_sfx_volume(self.save.sfx_volume)
+                case 2:  # Music
+                    self.save.music_volume = round((self.save.music_volume + 0.25) % 1.25, 2)
+                    music.set_volume(self.save.music_volume)
+                case 3:  # Show FPS
+                    self.save.show_fps = not self.save.show_fps
+                case 4:  # Reset high scores
+                    self.save.high_scores = []
+                case 5:  # Back
+                    self.state = GameState.TITLE
+            persistence.save(self.save)
+        elif event.key == pygame.K_ESCAPE:
+            self.state = GameState.TITLE
+
+    def _handle_stage_select_key(self, event: pygame.event.Event) -> None:
+        max_unlocked = (self.save.highest_cleared_stage + 1) if not self.save.beat_game else 2
+        if event.key in {pygame.K_UP, pygame.K_w}:
+            self.stage_select_cursor = max(0, self.stage_select_cursor - 1)
+        elif event.key in {pygame.K_DOWN, pygame.K_s}:
+            self.stage_select_cursor = min(2, self.stage_select_cursor + 1)
+        elif event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
+            if self.stage_select_cursor <= max_unlocked:
+                self.new_run(starting_stage=self.stage_select_cursor)
+        elif event.key == pygame.K_ESCAPE:
+            self.state = GameState.TITLE
+
+    def _tutorial_tick(self) -> None:
+        """Step through inline prompts the first time a player runs the game."""
+        assert self.world is not None
+        steps = [
+            ("USE ARROWS / WASD TO MOVE",   240),
+            ("PRESS SPACE TO JUMP",         240),
+            ("PRESS Z TO PUNCH NEAR ENEMIES", 999),  # waits for first enemy nearby
+            ("HOLD SHIFT TO RUN",           240),
+            ("PRESS C TO THROW A BATARANG", 240),
+        ]
+        if self.tutorial_step >= len(steps):
+            self.save.tutorial_seen = True
+            persistence.save(self.save)
+            self.tutorial_active = False
+            return
+        text, _ = steps[self.tutorial_step]
+        self.tutorial_text = text
+        self.tutorial_timer += 1
+        # Step 2 (PUNCH near enemies) waits until an enemy is on-screen
+        # within 80 px of player.
+        if self.tutorial_step == 2:
+            p = self.world.player
+            for e in self.world.enemies:
+                if e.alive and not e.is_dying and abs(e.x - p.x) < 80:
+                    self.tutorial_seen_first_enemy = True
+                    break
+            if self.tutorial_seen_first_enemy and self.world.player.combo > 0:
+                self.tutorial_step += 1
+                self.tutorial_timer = 0
+            return
+        if self.tutorial_timer >= steps[self.tutorial_step][1]:
+            self.tutorial_step += 1
+            self.tutorial_timer = 0
 
     def _record_score(self) -> None:
         if self.score_recorded or self.world is None:
@@ -599,6 +940,8 @@ class Game:
             case GameState.PLAYING if self.world is not None:
                 _update_world(self.world, keys)
                 w = self.world
+                if self.tutorial_active:
+                    self._tutorial_tick()
                 # Dead?
                 if w.player.state is PlayerState.DEAD and w.player.state_timer <= 0:
                     self._record_score()
@@ -624,32 +967,53 @@ class Game:
         match self.state:
             case GameState.TITLE:
                 _draw_title(c, self.blink)
+                _draw_title_menu(c, self._title_items(), self.title_cursor)
                 if self.save.high_scores:
                     draw_text(c, f"BEST {self.save.high_scores[0]:06d}", 4, 4, PALETTE["yellow"])
-                draw_text(c, "H: HIGH SCORES", NATIVE_W - 90, 4, PALETTE["gray"])
             case GameState.HIGH_SCORES:
                 _draw_high_scores(c, self.save.high_scores)
+            case GameState.SETTINGS:
+                _draw_title(c, self.blink)
+                _draw_settings(c, self.save, self.settings_cursor)
+            case GameState.STAGE_SELECT:
+                _draw_title(c, self.blink)
+                _draw_stage_select(c, self.save, self.stage_select_cursor)
             case GameState.LEVEL_INTRO if self.world is not None:
-                _draw_intro(c, self.world.level, self.blink)
+                _draw_intro(c, self.world.level, self.blink, self.stage_idx)
             case GameState.PLAYING if self.world is not None:
                 _draw_world(c, self.world)
+                if self.tutorial_active and self.tutorial_text:
+                    _draw_tutorial(c, self.tutorial_text, self.blink)
             case GameState.PAUSED if self.world is not None:
                 _draw_world(c, self.world)
                 _draw_pause(c, self.pause_cursor, self.save.sfx_volume, self.save.music_volume)
+            case GameState.PAUSE_CONTROLS if self.world is not None:
+                _draw_world(c, self.world)
+                _draw_controls_screen(c)
             case GameState.GAME_OVER if self.world is not None:
                 _draw_world(c, self.world)
                 _draw_game_over(c, self.world, self.blink)
             case GameState.VICTORY if self.world is not None:
                 _draw_world(c, self.world)
                 _draw_victory(c, self.world, self.blink)
+        # FPS overlay
+        if self.save.show_fps:
+            draw_text(c, f"{int(self.clock.get_fps())} FPS", NATIVE_W - 40, 4, PALETTE["green"])
 
         # Apply screen shake during gameplay (post-draw)
         ox, oy = (0, 0)
         if self.state is GameState.PLAYING and self.world is not None:
             ox, oy = self.world.shake.update()
-        scaled = pygame.transform.scale(c, (WINDOW_W, WINDOW_H))
+        # Letterbox to current window size while preserving 320x224 aspect.
+        sw, sh = self.screen.get_size()
+        ratio = min(sw / NATIVE_W, sh / NATIVE_H)
+        scaled_w = int(NATIVE_W * ratio)
+        scaled_h = int(NATIVE_H * ratio)
+        scaled = pygame.transform.scale(c, (scaled_w, scaled_h))
         self.screen.fill((0, 0, 0))
-        self.screen.blit(scaled, (ox * 3, oy * 3))
+        offset_x = (sw - scaled_w) // 2 + int(ox * ratio)
+        offset_y = (sh - scaled_h) // 2 + int(oy * ratio)
+        self.screen.blit(scaled, (offset_x, offset_y))
         pygame.display.flip()
 
     def run(self) -> None:
@@ -669,6 +1033,19 @@ class Game:
 # ----------------------------------------------------------------------
 # Bootstrap
 # ----------------------------------------------------------------------
+
+
+def _save_screenshot(canvas: pygame.Surface) -> None:
+    """Save the current 320x224 canvas to ~/batman-returns-screenshots/<ts>.png."""
+    import os
+    import time
+    folder = os.path.expanduser("~/batman-returns-screenshots")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"shot-{int(time.time())}.png")
+        pygame.image.save(canvas, path)
+    except OSError:
+        pass
 
 
 _PAD_TO_KEY: dict[int, int] = {
@@ -754,7 +1131,7 @@ def create_game() -> Game:
     pygame.init()
     pygame.joystick.init()
     pygame.display.set_caption("Batman Returns — Python Homage")
-    screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
+    screen = pygame.display.set_mode((WINDOW_W, WINDOW_H), pygame.RESIZABLE)
     canvas = pygame.Surface((NATIVE_W, NATIVE_H))
     clock = pygame.time.Clock()
     for i in range(pygame.joystick.get_count()):
