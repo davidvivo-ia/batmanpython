@@ -68,12 +68,26 @@ STAGES: Final = (
 
 
 @dataclass(slots=True)
+class Platform:
+    """Solid AABB in world coordinates. Top-only (player can drop through? no — solid)."""
+    x: int
+    y: int
+    w: int
+    h: int
+
+    @property
+    def rect(self) -> pygame.Rect:
+        return pygame.Rect(self.x, self.y, self.w, self.h)
+
+
+@dataclass(slots=True)
 class Level:
     stage: Stage
     cam_x: float = 0.0
     width_px: int = 0
     snowflakes: list[list[float]] = field(default_factory=list)  # [x, y, vx, vy]
     skyline: list[tuple[int, int, int]] = field(default_factory=list)  # x, h, palette_idx
+    platforms: list[Platform] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.width_px = self.stage.length_tiles * TILE_SIZE
@@ -94,6 +108,19 @@ class Level:
                     rng.uniform(-0.3, 0.3),
                     rng.uniform(0.3, 1.2),
                 ])
+        # Procedural platforms
+        from .constants import GROUND_Y
+        tx = 12
+        while tx < self.stage.length_tiles - 14:
+            if rng.random() < 0.32:
+                w_tiles = rng.randint(2, 4)
+                # height tier — low (jump height) or high (jump+jump?)
+                tier = rng.choice([1, 1, 2])
+                py = GROUND_Y - tier * 36
+                self.platforms.append(Platform(tx * TILE_SIZE, py, w_tiles * TILE_SIZE, 8))
+                tx += w_tiles + rng.randint(2, 5)
+            else:
+                tx += rng.randint(3, 6)
 
     # ------------------------------------------------------------------
     def update(self, target_cam_x: float, dt: float) -> None:
@@ -152,15 +179,29 @@ class Level:
         cam_t = int(self.cam_x) // TILE_SIZE
         offset = int(self.cam_x) % TILE_SIZE
         for col in range(NATIVE_W // TILE_SIZE + 2):
-            tx = (cam_t + col) % self.stage.length_tiles
             sx = col * TILE_SIZE - offset
             for row in range(2):
                 surf.blit(tile, (sx, ground_y + row * TILE_SIZE))
-            # platform variation: occasional brick block floating
-            if (tx * 7919) % 23 == 0 and tx > 5:
-                surf.blit(sprites.get("tile_brick"), (sx, ground_y - 48))
-                surf.blit(sprites.get("tile_brick"), (sx + 16, ground_y - 48))
+        # Real platforms
+        brick = sprites.get("tile_brick")
+        for plat in self.platforms:
+            sx = plat.x - int(self.cam_x)
+            if sx + plat.w < 0 or sx > NATIVE_W:
+                continue
+            for col in range(plat.w // TILE_SIZE):
+                surf.blit(brick, (sx + col * TILE_SIZE, plat.y - 8))
 
     # ------------------------------------------------------------------
     def world_to_screen(self, x: float) -> int:
         return int(x - self.cam_x)
+
+    def platform_top_below(self, x: float, foot_y: float, prev_foot_y: float) -> int | None:
+        """If foot crosses a platform top while falling, return its y. Else None."""
+        if foot_y < prev_foot_y:
+            return None
+        for plat in self.platforms:
+            if plat.x <= x <= plat.x + plat.w:
+                top = plat.y
+                if prev_foot_y <= top <= foot_y:
+                    return top
+        return None

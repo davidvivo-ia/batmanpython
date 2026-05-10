@@ -175,12 +175,23 @@ class Player:
 
         # Gravity (extra during dive-kick for snappy fall)
         self.vy += GRAVITY * (3.0 if dive else 1.0)
+        prev_foot = self.y + self.H
         self.y += self.vy
         self.x += self.vx
+        foot = self.y + self.H
+
+        # Platform collision (one-way from above)
+        landed_y: float | None = None
+        plat_top = level.platform_top_below(self.x, foot, prev_foot)
+        if plat_top is not None and self.vy >= 0:
+            landed_y = plat_top - self.H
 
         # Ground collision
         if self.y >= GROUND_Y - self.H:
-            self.y = GROUND_Y - self.H
+            landed_y = GROUND_Y - self.H
+
+        if landed_y is not None:
+            self.y = landed_y
             self.vy = 0
             if not self.on_ground:
                 if self.state is PlayerState.JUMP:
