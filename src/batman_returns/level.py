@@ -33,6 +33,8 @@ class Stage:
     sky_top: tuple[int, int, int]
     sky_bot: tuple[int, int, int]
     snow: bool = False
+    rain: bool = False
+    lightning: bool = False
     enemy_density: float = 0.10  # spawn probability per tile column
     boss: bool = False           # last stage spawns Penguin
     midboss_kind: str | None = None
@@ -49,6 +51,8 @@ STAGES: Final = (
         enemy_density=0.10,
         midboss_kind="midboss_joker",
         midboss_at_tile=120,
+        rain=True,
+        lightning=True,
     ),
     Stage(
         name="ICE PLAZA",
@@ -92,8 +96,11 @@ class Level:
     cam_x: float = 0.0
     width_px: int = 0
     snowflakes: list[list[float]] = field(default_factory=list)  # [x, y, vx, vy]
+    raindrops: list[list[float]] = field(default_factory=list)   # [x, y, vy]
     skyline: list[tuple[int, int, int]] = field(default_factory=list)  # x, h, palette_idx
     platforms: list[Platform] = field(default_factory=list)
+    lightning_flash: int = 0  # frames remaining
+    lightning_cooldown: int = 240
 
     def __post_init__(self) -> None:
         self.width_px = self.stage.length_tiles * TILE_SIZE
@@ -113,6 +120,13 @@ class Level:
                     rng.uniform(0, NATIVE_H),
                     rng.uniform(-0.3, 0.3),
                     rng.uniform(0.3, 1.2),
+                ])
+        if self.stage.rain:
+            for _ in range(80):
+                self.raindrops.append([
+                    rng.uniform(0, NATIVE_W),
+                    rng.uniform(0, NATIVE_H),
+                    rng.uniform(4.0, 7.0),
                 ])
         # Procedural platforms
         from .constants import GROUND_Y
@@ -144,6 +158,26 @@ class Level:
                 f[0] = NATIVE_W
             elif f[0] > NATIVE_W:
                 f[0] = 0
+        # Raindrops (slanted)
+        for r in self.raindrops:
+            r[0] -= 1.0  # wind
+            r[1] += r[2]
+            if r[1] > NATIVE_H:
+                r[1] = -4
+                r[0] = random.uniform(0, NATIVE_W)
+            if r[0] < 0:
+                r[0] = NATIVE_W
+        # Lightning
+        if self.stage.lightning:
+            if self.lightning_flash > 0:
+                self.lightning_flash -= 1
+            else:
+                self.lightning_cooldown -= 1
+                if self.lightning_cooldown <= 0:
+                    self.lightning_flash = random.randint(4, 10)
+                    self.lightning_cooldown = random.randint(180, 480)
+                    from . import audio
+                    audio.thunder().play()
 
     # ------------------------------------------------------------------
     def draw(self, surf: pygame.Surface) -> None:
@@ -153,6 +187,16 @@ class Level:
         if self.stage.snow:
             for f in self.snowflakes:
                 surf.set_at((int(f[0]), int(f[1])), PALETTE["snow"])
+        if self.stage.rain:
+            for r in self.raindrops:
+                x, y = int(r[0]), int(r[1])
+                pygame.draw.line(surf, PALETTE["lightgray"], (x, y), (x - 2, y + 4))
+        if self.lightning_flash > 0:
+            # White overlay scaled by remaining frames
+            alpha = min(180, self.lightning_flash * 30)
+            flash = pygame.Surface((NATIVE_W, NATIVE_H), pygame.SRCALPHA)
+            flash.fill((255, 255, 255, alpha))
+            surf.blit(flash, (0, 0))
 
     def _draw_sky(self, surf: pygame.Surface) -> None:
         top = self.stage.sky_top

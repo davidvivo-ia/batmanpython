@@ -144,6 +144,17 @@ def death() -> pygame.mixer.Sound:
 
 
 @cache
+def thunder() -> pygame.mixer.Sound:
+    n = int(SAMPLE_RATE * 0.9)
+    wave = np.random.uniform(-1, 1, n)
+    # Cumulative low-pass (heavy) for rumble
+    kernel = np.ones(120) / 120
+    wave = np.convolve(wave, kernel, mode="same")
+    env = np.exp(-np.linspace(0, 4, n))
+    return _to_sound(wave * env, 0.6)
+
+
+@cache
 def title_jingle() -> pygame.mixer.Sound:
     notes = [(523, 0.15), (659, 0.15), (784, 0.15), (1047, 0.4)]
     parts = [_tone(f, d, shape="square") for f, d in notes]
@@ -164,7 +175,10 @@ def set_sfx_volume(v: float) -> None:
     """0.0..1.0; applied to all currently-cached sounds."""
     global _sfx_volume
     _sfx_volume = max(0.0, min(1.0, v))
-    for fn in (punch, kick, batarang, jump, hit, hurt, pickup, boss_roar, fire, death, title_jingle):
+    for fn in (
+        punch, kick, batarang, jump, hit, hurt, pickup,
+        boss_roar, fire, death, title_jingle, thunder,
+    ):
         try:
             fn().set_volume(_sfx_volume)
         except Exception:
