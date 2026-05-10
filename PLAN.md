@@ -1,310 +1,499 @@
-# PLAN.md — Improvement roadmap for Batman Returns (Python)
+# PLAN.md v2 — Comprehensive completion roadmap
 
-> Granular task list. Each item is self-contained: file paths, exact change,
-> acceptance criterion. A sub-agent should be able to execute one task without
-> reading the rest of the plan.
+> Deeper, source-grounded roadmap. Each task lists files to edit, function
+> anchors, exact change, and acceptance criterion. A sub-agent should be able
+> to execute one task without reading the rest of the plan.
+>
+> **Citations** to the original 1992 Sega CD source live at
+> [`RetailGameSourceCode/BatmanReturns`](https://github.com/RetailGameSourceCode/BatmanReturns)
+> and Chris Shrigley's archive
+> [`Batman_Returns_SegaCD_Project_Package.zip`](http://shrigley.com/source_code_archive/).
+> Filenames cited as `LEVEL_X/FILE.68K` are real modules in the upstream tree.
 
-## Player feedback driving this round
+## Original-source mapping (what we faithfully ported, what's still missing)
 
-- **"No veo cómo disparas"** — the user can't tell how to throw the batarang.
-  Root cause: HUD shows just `BAT x5`, no key hint. Title-screen control
-  reference is gone once you start. Batarang sprite is 10×9 px and travels at
-  4.5 px/frame so it's easy to miss visually.
-- **"Tampoco veo cómo pasar de nivel"** — the user can't tell how to advance.
-  Root causes: stages are 2 560–2 880 px wide with no on-screen progress bar,
-  no goal flag, no objective text. Stage-clear gating on midboss-defeat means
-  hitting the right edge before killing the midboss silently does nothing.
+### Already ported (from BATMAN.EQU, TECH.DOC, PANEL.EQU)
 
-## Implementation contract for any sub-agent picking up a task
+- 16×16 tile system (`TECH.DOC`) → `constants.TILE_SIZE`
+- Score economy (`BATMAN.EQU`): 200/100/500/2000/5000 → `SCORE_*`
+- Bottom HUD panel (`PANEL.EQU`) → `hud.draw_hud`
+- Per-sprite `OBJ_FLASH1` palette flicker (`DAMAGE.68K`) → `Enemy.iframes` red tint
+- KILL_CTRL death pipeline (`DAMAGE.68K`) → `Enemy.is_dying` 18-frame squash
+- LEVEL_1 enemies: BASHER, JACKNBOX, FIRETRUC+MINIFIRE, VILLAN
+  → `EnemyKind.{BASHER,JACKBOX,FIREBREATHER,KNIFER,MIDBOSS_JOKER}`
+- Multi-phase boss (`VILLAN.68K` + score $5000) → 3-phase Penguin
+- 20fps target lifted to 60fps (`TECH.DOC`)
+- Cinematic shell (`SHELL.EQU` `load_tween1`/`tween2`) → `LEVEL_INTRO` state
+- Per-villain game-over (`load_gameover1`/`gameover2`) → restart from title
 
-Each task lists:
-1. **Files** — exact paths to edit / create.
+### Still missing from the original ROM
+
+| Original module                | What it is                                | Status in port |
+|--------------------------------|-------------------------------------------|----------------|
+| `LEVEL_1/CYCLE.68K`            | Motorcycle clown — fast horizontal threat | **TODO P8.1**  |
+| `LEVEL_2/TANK.68K`             | Boss-class tank w/ shells                 | **TODO P8.2**  |
+| `LEVEL_2/CANNON.68K`+`MINICAN` | Stationary turret + small cannon           | TODO P8.3       |
+| `LEVEL_2/BOLARD.68K`+`TRCONE`  | Street bollards + traffic cones (obstacles)| TODO P8.4       |
+| `LEVEL_2/TRUCK.68K` / `ICETRUCK`| Heavy trucks bowling through              | TODO P8.5       |
+| `LEVEL_3/WKLITE.68K`           | "Weight-light" — heavy ramming clown       | TODO P8.6       |
+| `LEVEL_3/BACKANIM.68K`         | Animated background sprites               | TODO P12.1      |
+| `LEVEL_5/PENGUINS.68K`         | Mini-penguin swarm                        | TODO P14.3      |
+| `LEVEL_5/MINES.68K`            | Floating mines (water hazard)             | TODO P9.5       |
+| `SFX_EXPLDBOSS_A`              | Special boss-only death roar              | TODO P11.5      |
+| `SHELL/load_tween1..2`         | Per-stage cutscenes                       | TODO P12.x      |
+| `SHELL/load_finale1..2`        | Two-tier ending (driving-only / full)     | TODO P14.5      |
+| Driving stages (`CAR_CTRL`)    | Pseudo-3D Batmobile + Batskiboat          | Out of scope    |
+
+The driving stages remain explicitly out-of-scope — they would require a
+sprite-scaling rasterizer (`SCALE.68K`) which is a sub-engine of its own.
+
+---
+
+## Implementation contract
+
+For each task:
+1. **Files** — exact paths.
 2. **Where** — function or section anchor.
-3. **What** — the concrete change.
+3. **What** — concrete change.
 4. **Done when** — test name or visible behaviour.
 
-If a task touches `entities.py` Player/Enemy state, also add a regression test
-in `tests/test_bug_regressions.py` (or a new `tests/test_<feature>.py`).
-
-Run `ruff check src tests && SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
-pytest tests/ -q` after every task; both must pass.
+After every task: `ruff check src tests && SDL_VIDEODRIVER=dummy
+SDL_AUDIODRIVER=dummy pytest tests/ -q` must pass.
 
 ---
 
-## Phase 1 — Critical UX (player can actually play)
+## Phase 8 — Faithful enemy expansion (port the cut-content roster)
 
-### 1.1 HUD: show key hint next to batarang counter
+### 8.1 CYCLE (motorcycle clown) — *high priority*
 
-- **Files**: `src/batman_returns/hud.py`
-- **Where**: `draw_hud()`
-- **What**: replace `f"BAT x{player.batarangs}"` with `f"[C]BAT x{player.batarangs}"`. Use yellow when player has ≥1 batarang, gray when 0.
-- **Done when**: HUD visibly shows `[C]BAT x5` during gameplay.
+Original: `LEVEL_1/CYCLE.68K` — fast horizontal mover that closes distance hard.
 
-### 1.2 HUD: pulse-highlight batarang ammo when full or just-thrown
+- **Files**: `entities.py`, `sprites.py`, `constants.py`, `game.py`
+- **What**: new `EnemyKind.CYCLE` with a 24×16 sprite (clown on a wheeled bike).
+  Behaviour: targets player y, charges horizontally at 4.5 px/frame; on contact
+  deals heavy damage (18) then drives off-screen. HP 25 (low — kill with one
+  good hit).
+- **Spawn weight**: weight 3 in `_spawn_for_stage` for stages 0, 1, 4 (Gotham/Rooftops/Docks).
+- **Done when**: a motorcycle enemy occasionally streaks across the screen.
 
-- **Files**: `src/batman_returns/hud.py`, `src/batman_returns/entities.py`
-- **Where**: `Player.try_throw` (set `last_throw_frame = 0`), HUD reads it
-- **What**: when `Player.last_throw_frame > 0`, draw a yellow flash circle behind the BAT counter for 8 frames; decrement each frame in `Player.update`.
-- **Done when**: throwing batarang produces visible flash on the HUD.
+### 8.2 TANK (street tank mid-boss alternative)
 
-### 1.3 Stage progress bar at the top
+Original: `LEVEL_2/TANK.68K` + `CANNON.68K`.
 
-- **Files**: `src/batman_returns/hud.py`, `src/batman_returns/game.py`
-- **Where**: new `draw_stage_progress(surf, level)` called in `_draw_world`.
-- **What**: thin 2-px-tall bar, `bar_x=80, y=2, w=160`. Fill ratio = `cam_x / (width_px - NATIVE_W)`. Use purple → yellow gradient. Add a tick mark at `midboss_at_tile / length_tiles` if midboss exists.
-- **Done when**: `tests/test_hud.py::test_progress_bar_position_matches_cam` passes by computing pixel positions.
+- **Files**: `entities.py`, `sprites.py`, `constants.py`
+- **What**: new `EnemyKind.TANK` — slow (0.4 px/f), HP 220, fires a parabolic
+  shell every 90 frames. Walking into it deals 22 dmg.
+- **Where**: optional spawn after Joker midboss (weight 1 in stage 0/1).
+- **Done when**: tanks occasionally appear in late-stage spawn; slow + threatening.
 
-### 1.4 Goal arrow indicator (right edge)
+### 8.3 CANNON / MINICAN (stationary turret)
 
-- **Files**: `src/batman_returns/game.py`
-- **Where**: `_draw_world` after HUD draw
-- **What**: when `world.player.x > width_px - NATIVE_W * 1.5` and stage is non-boss, draw an animated `▶ GOAL` chevron pulsing on the right edge (use draw_text with two sizes alternating every 30 frames).
-- **Done when**: visible chevron on right edge of screen during the last screen of any stage.
+- **Files**: `entities.py`, `sprites.py`, `constants.py`
+- **What**: new `EnemyKind.CANNON` — fixed at spawn x; can't move; lobs shells
+  every 80 frames. HP 30, score $400.
+- **Done when**: stationary turrets appear at fixed mileposts in stage 1 and 4.
 
-### 1.5 End-of-stage goal flag entity (visible target)
+### 8.4 BOLARD / TRCONE (path obstacles)
 
-- **Files**: `src/batman_returns/sprites.py`, `src/batman_returns/level.py`, `src/batman_returns/game.py`
-- **Where**: new sprite `BAT_FLAG`, drawn at `(width_px - 32, GROUND_Y - 32)` for non-boss stages.
-- **What**: a yellow flag with a bat silhouette (24×32 sprite). Drawn each frame in `Level._draw_ground`. Player crossing `x >= flag_x` triggers stage advance (replaces width_px-NATIVE_W//2 condition).
-- **Done when**: visible flag sprite appears at end of stages 1 and 2 (not stage 3, which has Penguin).
+- **Files**: `level.py`, `sprites.py`
+- **What**: non-Enemy world props that deal 5 damage on contact and break
+  after one hit. Spawn occasionally on Gotham streets / Docks. Pure obstacle —
+  no AI.
+- **Done when**: visible cones / bollards block the player's path.
 
-### 1.6 Mid-boss / boss approach warning banner
+### 8.5 ICETRUCK (Ice Plaza heavy)
 
-- **Files**: `src/batman_returns/game.py`
-- **Where**: in `_spawn_for_stage` when midboss/boss spawns, set `world.warning_timer = 90`, `world.warning_text = ...`
-- **What**: draw a full-width red/yellow striped banner with text `WARNING — JOKER APPROACHING` for 90 frames after spawn. Banner overlays the stage at y=NATIVE_H/2-12.
-- **Done when**: banner visible for 1.5s when each midboss/boss spawns.
+Original: `LEVEL_3/ICETRUCK.68K`.
 
-### 1.7 Brighter, slower, traced batarang
+- **What**: a slow tank-variant scaled to ICE PLAZA palette.
+- **Done when**: tanks appear in Ice Plaza with light-blue trim.
 
-- **Files**: `src/batman_returns/sprites.py` (resize sprite), `src/batman_returns/entities.py` (`Batarang` class)
-- **Where**: `BATARANG` grid (12×9 → 14×11, brighter palette), `Batarang.update` (vx default 4.5 → 3.2)
-- **What**: redesign sprite with yellow highlight pixels in addition to black; lower vx; render a 4-frame trail (store last 4 positions in `Batarang.trail`, draw each as a fading dot).
-- **Done when**: batarang visibly leaves a yellow trail and travels noticeably slower.
+### 8.6 WKLITE (weight-light heavy clown)
 
-### 1.8 Batarang launch FX
+- **What**: 24×24 muscular clown that walks slowly (0.6 px/f), HP 90, contact
+  damage 18, knocks back the player on hit.
+- **Stages**: Sewers and Asylum.
 
-- **Files**: `src/batman_returns/game.py`
-- **Where**: in the KEYDOWN K_C / pad-button case, after `bat = p.try_throw()`
-- **What**: when `bat is not None`, call `world.particles.emit(bat.x, bat.y, count=8, speed=2.0, color=PALETTE["yellow"], life=10)` and `world.shake.kick(1.5)` for a brief visible launch.
-- **Done when**: throwing batarang produces a yellow particle burst at the throw point.
+### 8.7 Patrol radius differentiation
 
-### 1.9 LEVEL_INTRO shows controls + objective; longer duration
+Many enemies currently use the same 80px alert radius. Differentiate:
+- BASHER: 80
+- KNIFER: 120 (keeps distance, alerts further)
+- FIREBREATHER: 100
+- CYCLE: always alert (doesn't patrol)
+- TANK: always alert
+- CANNON: always alert (auto-fires)
 
-- **Files**: `src/batman_returns/game.py`
-- **Where**: `_draw_intro`, `new_run`/`advance_stage` (`intro_timer=90` → `180`)
-- **What**: extend intro to 3 seconds. Add three lines under stage name:
+---
+
+## Phase 9 — Combat depth: returning batarang + magnet pickups
+
+### 9.1 Returning batarang (boomerang motion)
+
+Original spirit: in the comics & 1992 game, the batarang loops back. Currently
+it just travels straight.
+
+- **Files**: `entities.py`
+- **What**: `Batarang.update` curves the path: after `life < 60`, start
+  decelerating vx then reverse direction. If it touches the player on the
+  return leg, increment ammo by 1 (re-catch). Pierces enemies on the return
+  leg too if charged.
+- **Done when**: regular batarangs visibly arc back and can be caught.
+
+### 9.2 Mid-air re-throw
+
+- **Files**: `game.py`
+- **What**: while a batarang is airborne, hold C lights up the HUD with a
+  cyan halo; pressing X mid-air recalls the batarang to player position
+  instantly (used for mid-air dive-kick combos).
+- **Done when**: pressing X while batarang is airborne snaps it home.
+
+### 9.3 Magnet pickup
+
+- **Files**: `entities.py`, `game.py`
+- **What**: a rare "magnet" pickup attracts all on-screen pickups towards the
+  player for 5 seconds.
+- **Done when**: walking over magnet pulls floating pickups to you.
+
+### 9.4 Boomerang + piercing combo
+
+- **What**: a charged batarang on the return leg hits the same enemy twice
+  (front and back). Update `hit_set` to allow this.
+
+### 9.5 Floating mines (water-stage hazard)
+
+Original: `LEVEL_5/MINES.68K`.
+
+- **Files**: `entities.py`, `level.py`
+- **What**: in water-hazard stages (Sewers, Docks), some hazard tiles spawn
+  bobbing mines that explode if shot or contacted (14 dmg radius).
+
+---
+
+## Phase 10 — Power-ups (3-stage timed buffs)
+
+### 10.1 Invincibility (~5s)
+
+- **Files**: `entities.py`, `game.py`, `sprites.py`
+- **What**: a yellow Bat-emblem pickup grants `Player.invuln_timer = 300`.
+  While >0, all damage is negated and the sprite cycles a rainbow tint.
+- **Done when**: walking into the bat-emblem pickup makes the player flash
+  rainbow and ignore enemy contact for 5s.
+
+### 10.2 Damage doubler (~8s)
+
+- **Files**: `entities.py`, `game.py`
+- **What**: a red `2x` icon pickup; while `Player.damage_buff_timer > 0`,
+  `attack_damage` is doubled. HUD shows `2X` next to score.
+- **Done when**: pickup grants 8s of doubled punch/kick/batarang damage.
+
+### 10.3 Infinite batarangs (~6s)
+
+- **Files**: `entities.py`, `game.py`
+- **What**: a blue infinity icon pickup; while `Player.infinite_bat_timer > 0`,
+  `try_throw` doesn't decrement `batarangs`. HUD draws `[C]BAT ∞`.
+- **Done when**: pickup grants 6s of free batarangs.
+
+### 10.4 Power-up drop logic
+
+- **Files**: `entities.py`
+- **What**: 2% drop chance from non-boss enemy kills (separate from `Pickup`
+  spawn rolls).
+
+---
+
+## Phase 11 — Boss polish (telegraphs + finale)
+
+### 11.1 Catwoman whip attack
+
+Was in PLAN v1 but never done.
+
+- **Files**: `entities.py`, `sprites.py`
+- **What**: between lunges, Catwoman extends a 60-px-long beam (sprite `whip`)
+  for 12 frames; intersects player hitbox = 14 dmg. Visually drawn as a
+  stretched line of yellow + black pixels.
+- **Done when**: Catwoman fight has visibly different lunge vs whip phases.
+
+### 11.2 Boss attack windups (Joker, Catwoman, Penguin)
+
+Original: implicit in slow `attack_cooldown` — but no visual cue. Add
+explicit telegraph:
+
+- 30 frames before each Joker fan-throw: red `!` over head + soft beep
+- 24 frames before each Catwoman lunge: orange `>` arrow
+- 30 frames before each Penguin shot: red `!` (already done)
+
+### 11.3 Boss stagger (group-attack interrupt)
+
+- **What**: if a boss takes ≥80 damage in a single frame (e.g. charged batarang
+  + dive-kick combo), they enter a 30-frame stagger state — no attacks, takes
+  +50% damage.
+- **Done when**: heavy combo on a boss visibly pauses them.
+
+### 11.4 Penguin phase-3 enrage burst
+
+- **What**: when Penguin enters phase 3, all currently-airborne enemy shots
+  scatter outward for visual chaos; banner reads "ENRAGED!".
+- **Done when**: phase 3 transition is unmistakable.
+
+### 11.5 Special boss death VFX (`SFX_EXPLDBOSS_A`)
+
+- **Files**: `audio.py`, `game.py`
+- **What**: dedicated `audio.boss_explode()` + a 90-frame death animation
+  where the boss flickers, emits 60 particles, screen flashes white twice
+  at 30 frames spacing.
+- **Done when**: killing Penguin triggers visible cinematic death sequence.
+
+### 11.6 Penguin minion swarm in phase 3
+
+Original: `LEVEL_5/PENGUINS.68K`.
+
+- **What**: in phase 3, every 90 frames Penguin spawns a small "penguin chick"
+  (sprite shared with PENGUIN_BOSS scaled to 8×12) that walks at 1.5 px/f.
+
+---
+
+## Phase 12 — Cinematic stage intros / outros (`SHELL.EQU` parity)
+
+### 12.1 Two-panel pre-stage cutscene
+
+- **Files**: `game.py` (new state `STAGE_CINEMATIC`)
+- **What**: between LEVEL_INTRO and PLAYING, draw two static "panels" of
+  pixel-art with stylised dialogue. Uses procedural composition: stage name,
+  villain portrait, location text. 4 seconds total. Skippable.
+
+### 12.2 Per-stage narrative text
+
+- **Files**: `level.py` (`Stage.intro_lines: tuple[str, ...]`)
+- **What**: each stage gets 2-3 short story lines:
+  - Streets: "Christmas eve in Gotham. Joker's clowns are loose."
+  - Rooftops: "The chase climbs above the city."
+  - Sewers: "Penguin's lair lies below — through the slime."
+  - Ice Plaza: "Catwoman watches from the rooftops."
+  - Docks: "Mines float in the harbour."
+  - Asylum: "Echoes of madness fill Arkham's halls."
+  - Lair: "The final descent. Penguin makes his stand."
+
+### 12.3 Stage-clear panel
+
+- **Files**: `game.py` (new `STAGE_CLEAR` state)
+- **What**: 90-frame post-stage screen showing accumulated stats + bonuses
+  (see Phase 13).
+
+### 12.4 Title cinematic loop
+
+- **Files**: `game.py`
+- **What**: title screen plays a slow scrolling Gotham silhouette in the
+  background; bat-signal pulses; rain falls.
+
+---
+
+## Phase 13 — Stage-clear summary + score bonuses
+
+### 13.1 Stats tracker per stage
+
+- **Files**: `game.py` (`World.stats`)
+- **What**: track `kills`, `damage_taken`, `pickups_collected`, `time_frames`,
+  `combo_max`, `batarangs_used` per stage.
+
+### 13.2 End-of-stage scoring screen
+
+- **Files**: `game.py`
+- **What**: STAGE_CLEAR state shows:
   ```
-  OBJECTIVE: DEFEAT JOKER, REACH THE FLAG
-  Z PUNCH   X KICK   C BATARANG   ↓ SLIDE
-  ←→ MOVE   SPACE JUMP   P PAUSE
+  STAGE 2 CLEARED — GOTHAM ROOFTOPS
+  KILLS               ×12  +6000
+  TIME (1:24)              +2400
+  NO-DAMAGE BONUS          +5000
+  MAX COMBO          7X    +1500
+  ───────────────────────────────
+  TOTAL                   +14900
   ```
-- **Done when**: intro screen shows all controls for 3s.
+  Each line slides in over 12 frames.
 
-### 1.10 Pause menu adds CONTROLS page
+### 13.3 Time-bonus formula
 
-- **Files**: `src/batman_returns/game.py`
-- **Where**: `_draw_pause`, pause cursor count goes 4 → 5
-- **What**: new menu item `CONTROLS`. Selecting it pushes a sub-state showing keys + gamepad mapping. Esc/B returns to pause menu.
-- **Done when**: pause menu lists CONTROLS and the sub-screen renders with full mapping.
+- `+max(0, 5000 - time_frames * 2)` — encourages speed.
 
-### 1.11 Objective text on HUD (top centre)
+### 13.4 No-damage bonus
 
-- **Files**: `src/batman_returns/hud.py`, `src/batman_returns/game.py`
-- **Where**: `draw_hud` accepts optional `objective: str` parameter
-- **What**: show an objective string centre-top: `DEFEAT JOKER` while midboss alive; `REACH THE FLAG ▶` after midboss dies; `DEFEAT THE PENGUIN` on stage 3.
-- **Done when**: HUD shows live objective state matching world progression.
+- `+5000` if `damage_taken == 0` for the stage.
+
+### 13.5 All-pickup bonus
+
+- `+2000` if `pickups_collected == pickups_total` (all pickups in stage).
 
 ---
 
-## Phase 2 — First-run tutorial
+## Phase 14 — Endgame & replayability
 
-### 2.1 Persisted `tutorial_seen` flag in SaveData
+### 14.1 New Game Plus
 
-- **Files**: `src/batman_returns/persistence.py`
-- **What**: add `tutorial_seen: bool = False` to `SaveData`.
-- **Done when**: round-trip save/load preserves the flag.
+- **Files**: `persistence.py`, `game.py`, `constants.py`
+- **What**: after first VICTORY, set `save.beat_game = True`. Title screen
+  gains "NEW GAME +" option that:
+  - Doubles enemy HP and damage on top of difficulty scalars
+  - Gives the player 5 starting batarangs but 1 less life
+  - Unlocks a special "ng_plus" achievement on completion
+  - Title shows "NG+" indicator
 
-### 2.2 Tutorial overlay during first stage
+### 14.2 Secret 8th stage: THE BATCAVE
 
-- **Files**: `src/batman_returns/game.py`
-- **What**: when `not save.tutorial_seen` and stage_idx == 0, show inline prompts that fade in/out:
-  - 0–4s: `←→ TO MOVE`
-  - 4–8s: `SPACE TO JUMP`
-  - on first enemy spawn: `Z TO PUNCH`
-  - on first hit landed: `HOLD SHIFT TO RUN`
-  - on second enemy spawn: `C TO THROW BATARANG`
-  After all prompts shown, set `save.tutorial_seen = True` and persist.
-- **Done when**: prompts appear in order on a fresh save dir.
+- **Files**: `level.py`, `sprites.py`, `game.py`
+- **What**: only accessible from STAGE SELECT after first full clear.
+  Dense enemy waves (density 0.25), no hazards, all 6 mook enemy types,
+  unique tile sprite. 90 tiles long. Music: lair theme.
+- **Done when**: STAGE SELECT shows the 8th stage greyed out before victory,
+  unlocked after.
 
-### 2.3 Skip tutorial in subsequent runs
+### 14.3 Penguin chick swarm (LEVEL_5/PENGUINS.68K)
 
-- **Files**: `src/batman_returns/game.py`
-- **What**: gate prompt logic behind `not save.tutorial_seen`.
-- **Done when**: deleting save file shows tutorial; running again does not.
+- **Files**: `entities.py`
+- **What**: see Phase 11.6 above.
 
----
+### 14.4 Time attack mode
 
-## Phase 3 — Combat polish
+- **Files**: `game.py`, `persistence.py`
+- **What**: from settings, toggle "TIME ATTACK". Stages run with a visible
+  timer counting up; final score shown is the total time. Best times persist
+  per stage.
 
-### 3.1 Charged batarang (hold C)
+### 14.5 Ending picture (load_finale1)
 
-- **Files**: `src/batman_returns/entities.py`, `src/batman_returns/game.py`
-- **What**: track `Player.charge_frames` while C held; at ≥45 frames release fires a "piercing" batarang (passes through enemies, double damage, doesn't decrement count).
-- **Done when**: holding C ≥0.75s and releasing fires a glowing batarang that doesn't consume ammo.
-
-### 3.2 Combo names
-
-- **Files**: `src/batman_returns/game.py`, `src/batman_returns/effects.py`
-- **What**: emit floating text on combo milestones: 2=`DOUBLE`, 3=`TRIPLE`, 5=`MEGA COMBO`, 10=`UNSTOPPABLE`.
-- **Done when**: hitting 5 enemies in window shows `MEGA COMBO` floating text.
-
-### 3.3 Hit-stop on first kill of run
-
-- **Files**: `src/batman_returns/game.py`, `src/batman_returns/effects.py`
-- **What**: track `world.first_kill_done = False`; on first enemy kill freeze for 8 extra frames and emit a yellow flash overlay.
-- **Done when**: first kill noticeably pauses; subsequent kills do not.
-
-### 3.4 Boss attack telegraph
-
-- **Files**: `src/batman_returns/entities.py`
-- **What**: 30 frames before each Penguin shot, render a red `!` over Penguin's head and play a soft warning beep (new `audio.warn()`).
-- **Done when**: boss telegraphs each shot with visible `!` and audible cue.
-
-### 3.5 Smoke bomb pickup (rare)
-
-- **Files**: `src/batman_returns/entities.py`, `src/batman_returns/sprites.py`, `src/batman_returns/game.py`
-- **What**: new `Pickup("smoke")`; on pickup, deals 999 damage to all enemies within 64 px; rate ≈3% of pickup spawns.
-- **Done when**: walking into a smoke pickup wipes nearby enemies.
-
-### 3.6 Enemy death animation
-
-- **Files**: `src/batman_returns/entities.py`
-- **What**: on `Enemy.alive=False`, set `Enemy.death_timer=18` instead of immediate cleanup; during decay, draw with horizontal squash and fade alpha.
-- **Done when**: enemies briefly squash + fade instead of vanishing.
+- **Files**: `game.py`
+- **What**: VICTORY screen shows a procedurally-composed Gotham skyline with
+  bat-signal in the centre + "GOTHAM IS SAFE" text fading in over 90 frames.
+  Then list 3 lines of credits.
 
 ---
 
-## Phase 4 — Level structure
+## Phase 15 — Localisation (Spanish)
 
-### 4.1 Cleaner stage transition (black wipe)
+### 15.1 String table
 
-- **Files**: `src/batman_returns/game.py`
-- **What**: new state `STAGE_TRANSITION` — black overlay grows from 0% to 100% alpha over 30 frames, then advances stage, then shrinks back. Replaces hard cut.
-- **Done when**: stage advance shows 1s wipe-out and wipe-in.
+- **Files**: new `src/batman_returns/i18n.py`
+- **What**: dict-based string table. `t("score") -> "SCORE"` (en) /
+  `"PUNTOS"` (es). All UI strings routed through `t()`.
 
-### 4.2 Difficulty selection
+### 15.2 Settings: language toggle
 
-- **Files**: `src/batman_returns/persistence.py`, `src/batman_returns/game.py`, `src/batman_returns/constants.py`
-- **What**: add `Difficulty(StrEnum)`; on title screen offer EASY/NORMAL/HARD as a third menu item. Apply scalars to enemy HP / contact damage / batarang ammo.
-- **Done when**: difficulty selection visibly changes enemy HP totals (verify via test).
+- **Files**: `persistence.py`, `game.py`
+- **What**: `save.language = "en" | "es"`. Settings menu adds `LANGUAGE  ENG/ESP`.
 
-### 4.3 Continue from highest cleared stage
+### 15.3 Spanish translation table
 
-- **Files**: `src/batman_returns/persistence.py`, `src/batman_returns/game.py`
-- **What**: persist `highest_cleared_stage`; offer `CONTINUE FROM STAGE N` on title when >0.
-- **Done when**: clearing stage 1 then quitting and restarting offers continue from stage 2.
-
-### 4.4 Stage select after first full clear
-
-- **Files**: `src/batman_returns/persistence.py`, `src/batman_returns/game.py`
-- **What**: after VICTORY, set `save.beat_game = True`. Title screen gains `STAGE SELECT` menu item that lets player choose any unlocked stage.
-- **Done when**: completing the game unlocks stage select.
+- Stage names: Calles de Gotham / Tejados de Gotham / Las Cloacas / Plaza de Hielo /
+  Muelle / Manicomio Arkham / Guarida del Pingüino / La Baticueva
+- Objectives: DERROTA AL JOKER, ALCANZA LA META, CUIDADO CON EL VACÍO, etc.
+- Menu: NUEVA PARTIDA, CONTINUAR, SELECCIONAR FASE, OPCIONES, MEJORES PUNTUACIONES, SALIR
 
 ---
 
-## Phase 5 — Enemy variety + combat depth
+## Phase 16 — Polish round 2
 
-### 5.1 Patrol → chase AI states
+### 16.1 Per-enemy unique death SFX
 
-- **Files**: `src/batman_returns/entities.py`
-- **What**: new `Enemy.alert: bool` — false at spawn, set true when player enters 80 px or attacks land. Patrolling enemies pace 32 px around spawn point at half speed.
-- **Done when**: walking past an unalerted enemy at distance ≥120 px doesn't aggro them.
+- **Files**: `audio.py`, `entities.py`
+- **What**: `audio.death_for(kind: EnemyKind) -> Sound` returning a tinted
+  variant: clowns get a "wahwah", knifers a clatter, fire-breathers a hiss.
 
-### 5.2 Skater clown (Ice Plaza)
+### 16.2 Animated HUD heart icons (lives)
 
-- **Files**: `src/batman_returns/entities.py`, `src/batman_returns/sprites.py`, `src/batman_returns/constants.py`
-- **What**: new `EnemyKind.SKATER` — slides at 3.0 px/frame on flat ground, can't change direction quickly; dodges punch by sliding under, vulnerable to dive-kick.
-- **Done when**: Ice Plaza spawns occasional skaters that slide past the player.
+- **Files**: `hud.py`
+- **What**: lives icons pulse softly at 0.5 Hz, brighten when picked up.
 
-### 5.3 Penguin umbrella shield
+### 16.3 Damage-tinted screen edge
 
-- **Files**: `src/batman_returns/entities.py`
-- **What**: in phase 2, after each shot, Penguin enters `shielded` state for 30 frames during which `take_damage` returns False without changing HP. Visual: white outline around sprite.
-- **Done when**: hitting Penguin during shield window shows outline and no HP loss.
+- **Files**: `game.py`
+- **What**: when `player.hp < 30`, the screen edges pulse red faintly to
+  signal critical state.
 
-### 5.4 Catwoman whip
+### 16.4 Slow-mo on dive-kick kill
 
-- **Files**: `src/batman_returns/entities.py`
-- **What**: between lunges, Catwoman occasionally lashes a horizontal whip beam (renderable as fast knife_proj variant with sprite `whip`).
-- **Done when**: Catwoman fight has a long-range whip in addition to lunges.
+- **Files**: `game.py`
+- **What**: on a dive-kick kill, freeze for 8 frames + emit 16 yellow
+  particles upward.
 
----
+### 16.5 Combo timer ring
 
-## Phase 6 — World polish
+- **Files**: `hud.py`
+- **What**: replace the linear combo bar with a circular ring that drains
+  clockwise when combo timer is decreasing.
 
-### 6.1 Foreground parallax layer
+### 16.6 Background pedestrian silhouettes
 
-- **Files**: `src/batman_returns/level.py`, `src/batman_returns/sprites.py`
-- **What**: add `Level._draw_foreground` after entity draws — lamp posts, ice spikes, columns at 1.4× parallax. Stage-specific.
-- **Done when**: visible foreground objects scroll faster than player.
+- **Files**: `level.py`
+- **What**: at far-parallax (factor 0.15), render small black silhouette
+  figures crossing the street on Gotham stages.
 
-### 6.2 Stage-specific platform sprites
+### 16.7 Animated bat-signal in title
 
-- **Files**: `src/batman_returns/sprites.py`, `src/batman_returns/level.py`
-- **What**: per-stage `platform_sprite` field; stage 1 = brick, stage 2 = ice block, stage 3 = lair stone.
-- **Done when**: each stage uses different platform tile.
-
-### 6.3 Background pedestrians silhouettes
-
-- **Files**: `src/batman_returns/level.py`
-- **What**: at stage 1's far parallax, render small black silhouettes walking across.
-- **Done when**: tiny figures visible in Gotham background.
+- **Files**: `game.py`
+- **What**: title's bat-signal pulses with rotating beam; bat sprite gently
+  bobs vertically.
 
 ---
 
-## Phase 7 — Quality of life
+## Phase 17 — Tests & CI
 
-### 7.1 Settings screen
+### 17.1 Tests for every new enemy kind
 
-- **Files**: `src/batman_returns/game.py`
-- **What**: separate state `SETTINGS` reachable from title; expand current pause options (SFX/music vol) and add `FULLSCREEN`, `SHOW FPS`, `RESET HIGH SCORES`.
-- **Done when**: settings persist and apply.
+- **Files**: `tests/test_enemies.py` (new)
+- **What**: spawn each new kind, verify it doesn't crash on update for 60
+  frames, verify damage/score values match constants.
 
-### 7.2 Window resizable + scaled
+### 17.2 Tests for power-up timers
 
-- **Files**: `src/batman_returns/game.py`
-- **What**: pass `pygame.RESIZABLE` flag; on `pygame.VIDEORESIZE` recompute scaled blit rect maintaining 320×224 aspect with letterboxing.
-- **Done when**: dragging the window edge keeps the game letterboxed without distortion.
+- **Files**: `tests/test_powerups.py`
+- **What**: each power-up sets the right timer; expires correctly.
 
-### 7.3 Screenshot key
+### 17.3 Tests for stage-clear bonuses
 
-- **Files**: `src/batman_returns/game.py`
-- **What**: F12 saves current canvas to `~/batman-returns-screenshots/<timestamp>.png`.
-- **Done when**: pressing F12 writes a PNG.
+- **Files**: `tests/test_stage_clear.py`
+- **What**: clearing a stage with no damage adds NO_DAMAGE_BONUS; max combo
+  kicks in COMBO_BONUS.
 
-### 7.4 Show FPS overlay
+### 17.4 Localisation roundtrip
 
-- **Files**: `src/batman_returns/game.py`, `src/batman_returns/hud.py`
-- **What**: when `save.show_fps`, draw `clock.get_fps()` integer in upper-right corner.
-- **Done when**: toggling the setting shows a live FPS number.
+- **Files**: `tests/test_i18n.py`
+- **What**: every key in EN table exists in ES; switching language updates
+  rendered text.
+
+### 17.5 NG+ scaling test
+
+- **Files**: `tests/test_ng_plus.py`
+- **What**: enemy spawn under NG+ has 2× HP of normal mode.
+
+### 17.6 Update CI matrix
+
+- Run new tests; ensure ≤ 3min total runtime.
 
 ---
 
-## Out-of-scope for this round (deferred)
+## Out-of-scope (deferred, low impact)
 
-- Full controller remapping UI
-- Online leaderboard
-- Modding / level editor
-- Batmobile driving stages (would need pseudo-3D rasterizer; original used SCALE.68K)
-- Network multiplayer
+- Driving stages 4-5 (require pseudo-3D renderer)
+- Online leaderboard / matchmaking
+- Mod / level editor
+- Controller remap UI (current mapping is fixed)
+- Steam achievements integration
 
 ---
 
 ## Phase ordering rationale
 
-Phase 1 fixes the immediate "I don't know what to do" pain. Phase 2 covers
-new players. Phases 3–7 are quality / depth in descending impact order. A
-sub-agent should be able to claim any task in any phase as long as Phase 1.x
-items are done first (especially 1.1, 1.5, 1.9, 1.11 — these reshape the HUD
-and intro that other tasks lean on).
+- **Phase 8** is highest immediate impact: faithful enemy roster matches the
+  original cut content + adds combat variety.
+- **Phase 9** layers boomerang dynamics that turn batarang from one-shot to
+  central mechanic.
+- **Phase 10** adds the temporary buff loop that makes pickups exciting.
+- **Phase 11** finalises bosses to feel set-piece (telegraphs, finale).
+- **Phase 12** & **13** wrap the campaign in proper presentation (cinematics,
+  stage-clear screen).
+- **Phase 14** unlocks endgame replayability.
+- **Phase 15** broadens audience.
+- **Phase 16-17** polish + safety net.
+
+A sub-agent can claim any task within a phase. Phase 8.x → 9 → 10 → 11 is
+the optimal feature order; 12-13 should be done together; 14-17 can run
+in parallel.
