@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import pygame
 
 from . import audio, music, persistence, sprites
+from .achievements import AchievementTracker
 from .constants import (
     EXTRA_LIFE_AT,
     FPS,
@@ -56,6 +57,7 @@ class World:
     shake: ScreenShake = field(default_factory=ScreenShake)
     freeze: HitFreeze = field(default_factory=HitFreeze)
     floats: FloatingTextSystem = field(default_factory=FloatingTextSystem)
+    achievements: AchievementTracker = field(default_factory=AchievementTracker)
 
 
 def _spawn_for_stage(world: World) -> None:
@@ -119,7 +121,9 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
     if world.freeze.tick():
         return
     p = world.player
+    hp_before = p.hp
     was_on_ground = p.on_ground
+    was_divekick = p.state is PlayerState.DIVEKICK
     p.update(keys, world.level)
     # Landing dust
     if not was_on_ground and p.on_ground:
@@ -165,12 +169,19 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
                     world.particles.burst_blood(cx, cy, dir_sign=p.facing)
                     world.shake.kick(5.0)
                     world.freeze.kick(3 if not e.boss else 8)
+                    world.achievements.on_kill(was_batarang=False, was_divekick=was_divekick)
                     if e.kind is EnemyKind.BOSS_PENGUIN:
                         world.boss_defeated = True
-                    elif e.kind in {EnemyKind.MIDBOSS_JOKER, EnemyKind.MIDBOSS_CATWOMAN}:
+                        world.achievements.on_boss_killed("boss_penguin")
+                    elif e.kind is EnemyKind.MIDBOSS_JOKER:
                         world.midboss_defeated = True
+                        world.achievements.on_boss_killed("boss_joker")
+                    elif e.kind is EnemyKind.MIDBOSS_CATWOMAN:
+                        world.midboss_defeated = True
+                        world.achievements.on_boss_killed("boss_catwoman")
         if any_hit:
             p.register_combo_hit()
+            world.achievements.on_combo(p.combo)
             if p.combo >= 3:
                 world.floats.emit(f"{p.combo}X COMBO!", p.x, p.y - 20, PALETTE["yellow"])
 
@@ -188,10 +199,16 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
                     world.particles.burst_blood(cx, cy, dir_sign=1 if b.vx > 0 else -1)
                     world.shake.kick(4.0)
                     world.freeze.kick(3 if not e.boss else 8)
+                    world.achievements.on_kill(was_batarang=True, was_divekick=False)
                     if e.kind is EnemyKind.BOSS_PENGUIN:
                         world.boss_defeated = True
-                    elif e.kind in {EnemyKind.MIDBOSS_JOKER, EnemyKind.MIDBOSS_CATWOMAN}:
+                        world.achievements.on_boss_killed("boss_penguin")
+                    elif e.kind is EnemyKind.MIDBOSS_JOKER:
                         world.midboss_defeated = True
+                        world.achievements.on_boss_killed("boss_joker")
+                    elif e.kind is EnemyKind.MIDBOSS_CATWOMAN:
+                        world.midboss_defeated = True
+                        world.achievements.on_boss_killed("boss_catwoman")
                 b.alive = False
                 break
 
@@ -217,9 +234,15 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
             world.floats.emit(label, pk.x, pk.y, PALETTE["green"])
             pk.apply(p)
 
+    # Track damage taken for "no damage" achievement
+    if p.hp < hp_before:
+        world.achievements.on_damage(hp_before - p.hp)
+    world.achievements.on_score(p.score)
+
     # FX update
     world.particles.update()
     world.floats.update()
+    world.achievements.update()
 
     # Cleanup
     world.enemies = [e for e in world.enemies if e.alive]
@@ -242,6 +265,7 @@ def _draw_world(surf: pygame.Surface, world: World) -> None:
     world.particles.draw(surf, world.level.cam_x)
     world.floats.draw(surf, world.level.cam_x)
     draw_hud(surf, world.player, world.level.stage.name)
+    _draw_toasts(surf, world)
 
 
 # ----------------------------------------------------------------------
@@ -288,6 +312,19 @@ def _draw_victory(surf: pygame.Surface, world: World, blink: int) -> None:
     draw_text(surf, f"FINAL SCORE {world.player.score:06d}", NATIVE_W // 2 - 70, NATIVE_H // 2 + 4, PALETTE["white"])
     if blink % 60 < 40:
         draw_text(surf, "ENTER TO PLAY AGAIN", NATIVE_W // 2 - 60, NATIVE_H // 2 + 30, PALETTE["yellow"])
+
+
+def _draw_toasts(surf: pygame.Surface, world: World) -> None:
+    """Stack achievement toasts in the upper-right corner."""
+    y = 20
+    for t in list(world.achievements.toasts)[:3]:
+        # Fade in/out by life
+        bar_w = len(t.text) * 6 + 24
+        bar_x = NATIVE_W - bar_w - 4
+        pygame.draw.rect(surf, PALETTE["dark"], (bar_x, y, bar_w, 14))
+        pygame.draw.rect(surf, PALETTE["yellow"], (bar_x, y, bar_w, 14), 1)
+        draw_text(surf, "* " + t.text, bar_x + 4, y + 4, PALETTE["yellow"])
+        y += 18
 
 
 def _draw_pause(surf: pygame.Surface, cursor: int, sfx_vol: float, music_vol: float) -> None:
@@ -346,14 +383,17 @@ class Game:
 
     def new_run(self) -> None:
         self.stage_idx = 0
-        self.world = self._make_world(carry=None)
+        self.world = self._make_world(carry=None, carry_tracker=None)
+        # Restore previously unlocked achievements (no toasts on restore)
+        self.world.achievements.unlocked = set(self.save.unlocked)
+        self.world.achievements.reset_for_stage(self.world.player.hp)
         self.state = GameState.LEVEL_INTRO
         self.intro_timer = 90
         self.score_recorded = False
         music.set_volume(self.save.music_volume)
         music.play_stage(self.stage_idx)
 
-    def _make_world(self, carry: Player | None) -> World:
+    def _make_world(self, carry: Player | None, carry_tracker: AchievementTracker | None) -> World:
         level = Level(STAGES[self.stage_idx])
         if carry is not None:
             player = carry
@@ -368,16 +408,26 @@ class Game:
                 batarangs=STARTING_BATARANGS,
                 next_extra_life=EXTRA_LIFE_AT,
             )
-        return World(level=level, player=player)
+        w = World(level=level, player=player)
+        if carry_tracker is not None:
+            w.achievements = carry_tracker
+        return w
 
     def advance_stage(self) -> None:
         assert self.world is not None
+        # Check the per-stage "no damage" achievement
+        self.world.achievements.on_stage_clear()
+        # Persist any new unlocks
+        self.save.unlocked = sorted(self.world.achievements.unlocked)
+        persistence.save(self.save)
         if self.stage_idx + 1 >= len(STAGES):
             self.state = GameState.VICTORY
             music.stop()
             return
         self.stage_idx += 1
-        self.world = self._make_world(carry=self.world.player)
+        prev_tracker = self.world.achievements
+        self.world = self._make_world(carry=self.world.player, carry_tracker=prev_tracker)
+        self.world.achievements.reset_for_stage(self.world.player.hp)
         self.state = GameState.LEVEL_INTRO
         self.intro_timer = 90
         music.play_stage(self.stage_idx)

@@ -33,6 +33,7 @@ class SaveData:
     music_volume: float = 0.6
     sfx_volume: float = 0.7
     fullscreen: bool = False
+    unlocked: list[str] = field(default_factory=list)
 
     def push_score(self, score: int) -> bool:
         """Insert score, keep top 5. Returns True if it made the table."""
