@@ -69,9 +69,11 @@ PALETTE: Final[dict[str, RGB]] = {
 class GameState(StrEnum):
     TITLE = auto()
     PLAYING = auto()
+    PAUSED = auto()
     GAME_OVER = auto()
     VICTORY = auto()
     LEVEL_INTRO = auto()
+    HIGH_SCORES = auto()
 
 
 class PlayerState(StrEnum):

@@ -151,7 +151,21 @@ def title_jingle() -> pygame.mixer.Sound:
     return _to_sound(wave, 0.3)
 
 
+_sfx_volume = 1.0
+
+
 def init() -> None:
     """Init mixer (must be called before pygame.display.set_mode for safety)."""
     pygame.mixer.pre_init(SAMPLE_RATE, -16, 2, 512)
     pygame.mixer.init()
+
+
+def set_sfx_volume(v: float) -> None:
+    """0.0..1.0; applied to all currently-cached sounds."""
+    global _sfx_volume
+    _sfx_volume = max(0.0, min(1.0, v))
+    for fn in (punch, kick, batarang, jump, hit, hurt, pickup, boss_roar, fire, death, title_jingle):
+        try:
+            fn().set_volume(_sfx_volume)
+        except Exception:
+            pass

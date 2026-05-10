@@ -30,6 +30,7 @@ from .constants import (
     GameState,
     PlayerState,
 )
+from . import persistence
 from .effects import FloatingTextSystem, HitFreeze, ParticleSystem, ScreenShake
 from .entities import (
     Batarang,
@@ -295,6 +296,28 @@ def _draw_victory(surf: pygame.Surface, world: World, blink: int) -> None:
         draw_text(surf, "ENTER TO PLAY AGAIN", NATIVE_W // 2 - 60, NATIVE_H // 2 + 30, PALETTE["yellow"])
 
 
+def _draw_pause(surf: pygame.Surface, cursor: int, sfx_vol: float) -> None:
+    overlay = pygame.Surface((NATIVE_W, NATIVE_H), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 170))
+    surf.blit(overlay, (0, 0))
+    draw_text(surf, "PAUSED", NATIVE_W // 2 - 30, NATIVE_H // 2 - 50, PALETTE["yellow"], scale=2)
+    items = ["RESUME", "QUIT TO TITLE", f"SFX VOL {int(sfx_vol * 100):3d}"]
+    for i, label in enumerate(items):
+        col = PALETTE["yellow"] if i == cursor else PALETTE["lightgray"]
+        prefix = "> " if i == cursor else "  "
+        draw_text(surf, prefix + label, NATIVE_W // 2 - 60, NATIVE_H // 2 - 10 + i * 14, col)
+
+
+def _draw_high_scores(surf: pygame.Surface, scores: list[int]) -> None:
+    surf.fill(PALETTE["dark"])
+    draw_text(surf, "HIGH SCORES", NATIVE_W // 2 - 60, 30, PALETTE["yellow"], scale=2)
+    if not scores:
+        draw_text(surf, "NO SCORES YET", NATIVE_W // 2 - 40, 90, PALETTE["lightgray"])
+    for i, s in enumerate(scores):
+        draw_text(surf, f"{i+1}. {s:08d}", NATIVE_W // 2 - 50, 80 + i * 16, PALETTE["white"])
+    draw_text(surf, "ENTER TO RETURN", NATIVE_W // 2 - 50, NATIVE_H - 24, PALETTE["gray"])
+
+
 def _draw_intro(surf: pygame.Surface, level: Level, blink: int) -> None:
     surf.fill(PALETTE["black"])
     draw_text(surf, "STAGE", NATIVE_W // 2 - 24, NATIVE_H // 2 - 30, PALETTE["lightgray"])
@@ -318,12 +341,16 @@ class Game:
     stage_idx: int = 0
     world: World | None = None
     intro_timer: int = 0
+    save: persistence.SaveData = field(default_factory=persistence.load)
+    pause_cursor: int = 0
+    score_recorded: bool = False
 
     def new_run(self) -> None:
         self.stage_idx = 0
         self.world = self._make_world(carry=None)
         self.state = GameState.LEVEL_INTRO
         self.intro_timer = 90
+        self.score_recorded = False
 
     def _make_world(self, carry: Player | None) -> World:
         level = Level(STAGES[self.stage_idx])
@@ -355,18 +382,29 @@ class Game:
     # ------------------------------------------------------------------
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.QUIT:
+            persistence.save(self.save)
             return False
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                if self.state in {GameState.TITLE, GameState.GAME_OVER, GameState.VICTORY}:
+        if event.type != pygame.KEYDOWN:
+            return True
+
+        match self.state:
+            case GameState.TITLE:
+                if event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
+                    self.new_run()
+                elif event.key == pygame.K_h:
+                    self.state = GameState.HIGH_SCORES
+                elif event.key == pygame.K_ESCAPE:
+                    persistence.save(self.save)
                     return False
-                self.state = GameState.TITLE
-                return True
-            if self.state is GameState.TITLE and event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
-                self.new_run()
-            elif self.state is GameState.PLAYING and self.world is not None:
+            case GameState.HIGH_SCORES:
+                if event.key in {pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER}:
+                    self.state = GameState.TITLE
+            case GameState.PLAYING if self.world is not None:
                 p = self.world.player
                 match event.key:
+                    case pygame.K_ESCAPE | pygame.K_p:
+                        self.state = GameState.PAUSED
+                        self.pause_cursor = 0
                     case pygame.K_SPACE | pygame.K_UP | pygame.K_w:
                         p.try_jump()
                     case pygame.K_z | pygame.K_j:
@@ -379,9 +417,38 @@ class Game:
                             self.world.batarangs.append(bat)
                     case pygame.K_DOWN | pygame.K_s:
                         p.try_slide()
-            elif self.state in {GameState.GAME_OVER, GameState.VICTORY} and event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
-                self.new_run()
+            case GameState.PAUSED:
+                if event.key in {pygame.K_UP, pygame.K_w}:
+                    self.pause_cursor = (self.pause_cursor - 1) % 3
+                elif event.key in {pygame.K_DOWN, pygame.K_s}:
+                    self.pause_cursor = (self.pause_cursor + 1) % 3
+                elif event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
+                    if self.pause_cursor == 0:
+                        self.state = GameState.PLAYING
+                    elif self.pause_cursor == 1:  # quit to title
+                        self._record_score()
+                        self.state = GameState.TITLE
+                    elif self.pause_cursor == 2:  # toggle SFX volume
+                        self.save.sfx_volume = round((self.save.sfx_volume + 0.25) % 1.25, 2)
+                        audio.set_sfx_volume(self.save.sfx_volume)
+                        persistence.save(self.save)
+                elif event.key in {pygame.K_ESCAPE, pygame.K_p}:
+                    self.state = GameState.PLAYING
+            case GameState.GAME_OVER | GameState.VICTORY:
+                if event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
+                    self._record_score()
+                    self.new_run()
+                elif event.key == pygame.K_ESCAPE:
+                    self._record_score()
+                    self.state = GameState.TITLE
         return True
+
+    def _record_score(self) -> None:
+        if self.score_recorded or self.world is None:
+            return
+        self.save.push_score(self.world.player.score)
+        persistence.save(self.save)
+        self.score_recorded = True
 
     # ------------------------------------------------------------------
     def update(self, keys: pygame.key.ScancodeWrapper) -> None:
@@ -396,11 +463,14 @@ class Game:
                 w = self.world
                 # Dead?
                 if w.player.state is PlayerState.DEAD and w.player.state_timer <= 0:
+                    self._record_score()
                     self.state = GameState.GAME_OVER
                 # Stage cleared?
                 if w.level.stage.boss:
                     if w.boss_defeated:
                         self.advance_stage()
+                        if self.state is GameState.VICTORY:
+                            self._record_score()
                 else:
                     if w.player.x >= w.level.width_px - NATIVE_W // 2:
                         self.advance_stage()
@@ -412,10 +482,18 @@ class Game:
         match self.state:
             case GameState.TITLE:
                 _draw_title(c, self.blink)
+                if self.save.high_scores:
+                    draw_text(c, f"BEST {self.save.high_scores[0]:06d}", 4, 4, PALETTE["yellow"])
+                draw_text(c, "H: HIGH SCORES", NATIVE_W - 90, 4, PALETTE["gray"])
+            case GameState.HIGH_SCORES:
+                _draw_high_scores(c, self.save.high_scores)
             case GameState.LEVEL_INTRO if self.world is not None:
                 _draw_intro(c, self.world.level, self.blink)
             case GameState.PLAYING if self.world is not None:
                 _draw_world(c, self.world)
+            case GameState.PAUSED if self.world is not None:
+                _draw_world(c, self.world)
+                _draw_pause(c, self.pause_cursor, self.save.sfx_volume)
             case GameState.GAME_OVER if self.world is not None:
                 _draw_world(c, self.world)
                 _draw_game_over(c, self.world, self.blink)
@@ -459,4 +537,6 @@ def create_game() -> Game:
     # Warm sprite cache so first frame isn't slow
     for name in sprites.SPRITE_REGISTRY:
         sprites.get(name)
-    return Game(screen=screen, canvas=canvas, clock=clock)
+    g = Game(screen=screen, canvas=canvas, clock=clock)
+    audio.set_sfx_volume(g.save.sfx_volume)
+    return g

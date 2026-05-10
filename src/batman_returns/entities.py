@@ -148,6 +148,8 @@ class Player:
         if self.state is PlayerState.DEAD:
             self.vy += GRAVITY
             self.y += self.vy
+            if self.state_timer > 0:
+                self.state_timer -= 1
             return
 
         # Combo timer decay
