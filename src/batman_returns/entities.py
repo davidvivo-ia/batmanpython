@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self
 
 import pygame
@@ -21,8 +21,6 @@ from .constants import (
     COMBO_SCORE_BONUS,
     COMBO_WINDOW,
     DIVEKICK_DAMAGE,
-    EnemyKind,
-    Facing,
     GRAVITY,
     GROUND_Y,
     HITSTUN_FRAMES,
@@ -30,11 +28,11 @@ from .constants import (
     JUMP_SPEED,
     KICK_DAMAGE,
     KICK_FRAMES,
+    NATIVE_W,
     PALETTE,
     PLAYER_MAX_HP,
     PUNCH_DAMAGE,
     PUNCH_FRAMES,
-    PlayerState,
     RUN_SPEED,
     SCORE_BOSS,
     SCORE_ENEMY,
@@ -42,8 +40,10 @@ from .constants import (
     SLIDE_DAMAGE,
     SLIDE_FRAMES,
     SLIDE_SPEED,
-    NATIVE_W,
     WALK_SPEED,
+    EnemyKind,
+    Facing,
+    PlayerState,
 )
 
 NATIVE_W_FOR_BOSS = NATIVE_W

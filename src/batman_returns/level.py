@@ -182,7 +182,6 @@ class Level:
     def _draw_ground(self, surf: pygame.Surface) -> None:
         tile = sprites.get(self.stage.ground_tile)
         ground_y = NATIVE_H - 32
-        cam_t = int(self.cam_x) // TILE_SIZE
         offset = int(self.cam_x) % TILE_SIZE
         for col in range(NATIVE_W // TILE_SIZE + 2):
             sx = col * TILE_SIZE - offset

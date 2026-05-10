@@ -23,9 +23,25 @@ batman-returns = "batman_returns.__main__:main"
 packages = ["src/batman_returns"]
 
 [tool.ruff]
-line-length = 100
+line-length = 110
 target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
-ignore = ["PLR2004", "PLR0913", "PLR0915"]
+# Game code routinely has many branches/returns and uses pygame's mutable
+# event dispatch pattern; skip the more pedantic complexity rules.
+ignore = [
+    "PLR2004",  # magic numbers (game tunables)
+    "PLR0913",  # too many args
+    "PLR0915",  # too many statements
+    "PLR0911",  # too many returns
+    "PLR0912",  # too many branches
+    "PLW0603",  # global statement (mixer channel singleton)
+    "PLR1714",  # set-of-comparisons style
+    "PLR1711",  # useless return (signals intent in event handlers)
+    "PLR5501",  # elif vs else-if
+    "PLC0415",  # late imports (avoid pygame import at module top in tests)
+    "SIM102",   # nested if (often clearer)
+    "SIM105",   # contextlib.suppress (overkill for one-liners)
+    "E501",     # long lines (sprite grids and prompt strings)
+]

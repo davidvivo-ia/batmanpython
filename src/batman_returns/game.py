@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import pygame
 
-from . import audio, sprites
+from . import audio, music, persistence, sprites
 from .constants import (
     EXTRA_LIFE_AT,
     FPS,
@@ -16,21 +16,15 @@ from .constants import (
     NATIVE_W,
     PALETTE,
     PLAYER_MAX_HP,
-    SCORE_BOSS,
-    SCORE_ENEMY,
-    SCORE_MIDBOSS,
-    SCORE_SMALL,
     STARTING_BATARANGS,
     STARTING_LIVES,
     TILE_SIZE,
     WINDOW_H,
     WINDOW_W,
     EnemyKind,
-    Facing,
     GameState,
     PlayerState,
 )
-from . import music, persistence
 from .effects import FloatingTextSystem, HitFreeze, ParticleSystem, ScreenShake
 from .entities import (
     Batarang,
