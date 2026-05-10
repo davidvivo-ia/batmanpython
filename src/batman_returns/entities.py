@@ -144,6 +144,11 @@ class Player:
         if self.state is PlayerState.DEAD:
             self.vy += GRAVITY
             self.y += self.vy
+            # Clamp to ground so the body doesn't fall through the floor while
+            # the death animation plays out.
+            if self.y >= GROUND_Y - self.H:
+                self.y = GROUND_Y - self.H
+                self.vy = 0
             if self.state_timer > 0:
                 self.state_timer -= 1
             return
