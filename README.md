@@ -42,6 +42,33 @@ as a future addition.
 - **`numpy`** for procedural ADSR/oscillator SFX synthesis
 - **`pygame-ce`** (community edition) — actively maintained pygame fork
 - Strict `ruff` lint config, hatchling build backend, Python `>=3.12`
+- **GitHub Actions CI** matrix on Python 3.12 + 3.13 (ruff + pytest with SDL dummy drivers)
+
+## Features beyond the original
+
+- **5 enemy archetypes** + Joker (stage 1 midboss) + Catwoman (stage 2 midboss) + multi-phase Penguin
+- **Combo system** — chained hits boost damage and score; HUD shows multiplier with draining timer
+- **Slide** (Down) with brief i-frames, **dive-kick** (Kick mid-air) for high damage
+- **Procedural platforms** — one-way (top-only) AABB collision
+- **Particle FX** — 256-slot recycled pool: hit sparks, blood bursts, landing dust, pickup confetti
+- **Screen shake + hit-freeze** for game-feel
+- **Floating "+500" score popups**
+- **Weather** — rain + lightning + procedural thunder rumble in Gotham; snow particles in Ice Plaza
+- **Procedural chiptune music** — square-lead + triangle-bass loops, one per stage
+- **Pause menu** with SFX/Music volume cyclers
+- **High-score persistence** in JSON (XDG/AppData/Application Support)
+- **10 achievements** with unlock toasts (FIRST BLOOD, COMBO MASTER, UNTOUCHABLE, GOTHAM SAVED, …)
+- **Gamepad support** — Xbox-style mapping, hot-plug, analog stick + dpad-hat
+
+## Tests
+
+```bash
+pip install -e . pytest
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy pytest tests/ -q
+```
+
+41 tests covering combat math, persistence round-trip, level geometry, end-to-end smoke
+runs, chaos-monkey input, and 8 regression tests for bugs caught in code review.
 
 ## Run it
 
@@ -59,17 +86,20 @@ Requires Python ≥ 3.12 (3.13 recommended).
 | ←/→ or A/D         | Walk                  |
 | Shift              | Run (hold)            |
 | Space / ↑ / W      | Jump                  |
+| ↓ or S             | Slide (low profile + brief i-frames) |
 | Z or J             | Punch (25 dmg)        |
-| X or K             | Kick (35 dmg)         |
+| X or K             | Kick (35 dmg) — **mid-air = dive-kick (50 dmg)** |
 | C or L             | Throw Batarang (50 dmg, limited) |
+| P or Esc           | Pause                 |
 | Enter              | Start / Retry         |
-| Esc                | Pause to title / quit |
+| H (on title)       | High scores           |
+| Gamepad            | A=jump, X=punch, Y=kick, B=batarang, LB/RB=slide, Start=pause |
 
 ## Stages
 
-1. **Gotham Streets** — clowns, knife-throwers
-2. **Ice Plaza** — fire-breather clowns, jack-in-the-boxes (snow particles)
-3. **Penguin's Lair** — boss arena: the Penguin paces and lobs knives
+1. **Gotham Streets** — clowns, knife-throwers, **rain + lightning + thunder**, midboss **Joker** (3-card fan)
+2. **Ice Plaza** — fire-breather clowns, jack-in-the-boxes, snow particles, midboss **Catwoman** (lunge + jump-over)
+3. **Penguin's Lair** — final boss the **Penguin** in 3 phases (single shot → double + dive → triple spread)
 
 Score the original economy: small object 100, pickup 200, enemy 500, mid-boss
 2 000, final boss 5 000. Extra life every 20 000 points.
@@ -78,14 +108,26 @@ Score the original economy: small object 100, pickup 200, enemy 500, mid-boss
 
 ```
 src/batman_returns/
-  __main__.py     # python -m entry
-  game.py         # main loop, state machine, world container
-  constants.py    # tunables (mostly from BATMAN.EQU)
-  entities.py     # Player, Enemy, Batarang, EnemyProjectile, Pickup
-  level.py        # Stage definitions, parallax, tilemap streamer
-  sprites.py      # procedural pixel art (string-grid → Surface)
-  hud.py          # bottom panel + 5×7 bitmap font
-  audio.py        # numpy-synthesised SFX (punch, kick, batarang…)
+  __main__.py        # python -m entry
+  game.py            # main loop, state machine, world container
+  constants.py       # tunables (mostly from BATMAN.EQU)
+  entities.py        # Player, Enemy, Batarang, EnemyProjectile, Pickup
+  level.py           # Stage defs, parallax, platforms, weather, tilemap streamer
+  sprites.py         # procedural pixel art (string-grid → Surface)
+  hud.py             # bottom panel + 5×7 bitmap font
+  audio.py           # numpy-synthesised SFX (punch, kick, batarang…)
+  music.py           # procedural chiptune loops (one per stage)
+  effects.py         # particle pool, screen shake, hit-freeze, floating text
+  achievements.py    # 10 unlockable badges + toast queue
+  persistence.py     # save.json (XDG/AppData/Application Support)
+  input.py           # gamepad helper layer (also baked into game.py dispatch)
+tests/
+  test_combat.py             # damage / score / hitbox / i-frames
+  test_persistence.py        # save round-trip, top-5 cap
+  test_level.py              # platform geometry, camera clamp
+  test_game_loop.py          # 2000-frame headless smoke runs
+  test_stress.py             # chaos-monkey input + invariants
+  test_bug_regressions.py    # guards 8 specific bugs caught in review
 ```
 
 ## Notes for the curious
