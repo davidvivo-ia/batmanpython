@@ -1,0 +1,615 @@
+"""Procedural pixel art. Every sprite is drawn at runtime onto a Surface.
+
+Each sprite is described as a string grid; characters map to palette keys via
+``LEGEND``. ``make_sprite`` returns a per-pixel-alpha Surface ready to blit.
+This keeps the repo asset-free and tweakable.
+"""
+
+from __future__ import annotations
+
+from functools import cache
+
+import pygame
+
+from .constants import PALETTE
+
+LEGEND: dict[str, str | None] = {
+    ".": None,            # transparent
+    "K": "black",
+    "D": "dark",
+    "N": "night",
+    "P": "purple",
+    "M": "magenta",
+    "G": "gray",
+    "L": "lightgray",
+    "W": "white",
+    "S": "skin",
+    "Y": "yellow",
+    "O": "orange",
+    "R": "red",
+    "B": "bloodred",
+    "E": "green",
+    "Q": "snow",
+}
+
+
+def make_sprite(grid: list[str], scale: int = 1) -> pygame.Surface:
+    """Build a Surface from a string grid. Top-left origin."""
+    h = len(grid)
+    w = max(len(row) for row in grid)
+    surf = pygame.Surface((w * scale, h * scale), pygame.SRCALPHA)
+    for y, row in enumerate(grid):
+        for x, ch in enumerate(row):
+            if ch == "." or ch == " ":
+                continue
+            key = LEGEND.get(ch)
+            if key is None:
+                continue
+            color = PALETTE[key]
+            if scale == 1:
+                surf.set_at((x, y), color)
+            else:
+                pygame.draw.rect(surf, color, (x * scale, y * scale, scale, scale))
+    return surf
+
+
+# ----------------------------------------------------------------------
+# Batman sprites (16 wide x 24 tall) — chunky, readable silhouette.
+# Cape on left when facing right. We mirror at runtime for the other side.
+# ----------------------------------------------------------------------
+
+BATMAN_IDLE = [
+    "....KKKK........",
+    "...KKKKKK.......",
+    "..KK.KK.KK......",
+    "..KKKKKKKK......",
+    "...KSSSSK.......",
+    "...SSSSSSS......",
+    "..KKSSSSKK......",
+    ".KKKKKKKKK......",
+    "KKKYYKKYYKKK....",
+    "KKKKKKKKKKKK....",
+    "KKK.KKKK.KKK....",
+    ".K..KKKK..K.....",
+    "....KKKK........",
+    "....KKKK........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "...KK..KK.......",
+    "...KK..KK.......",
+    "..KKK..KKK......",
+]
+
+BATMAN_WALK_A = [
+    "....KKKK........",
+    "...KKKKKK.......",
+    "..KK.KK.KK......",
+    "..KKKKKKKK......",
+    "...KSSSSK.......",
+    "...SSSSSSS......",
+    "..KKSSSSKK......",
+    ".KKKKKKKKK......",
+    "KKKYYKKYYKKK....",
+    "KKKKKKKKKKKK....",
+    ".KK.KKKK.KK.....",
+    ".K..KKKK..K.....",
+    "....KKKK........",
+    "....KKKK........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "...K....K.......",
+    "...K....K.......",
+    "..K......K......",
+    "..K......K......",
+    ".KK......KK.....",
+    "KKK......KKK....",
+    "KK........KK....",
+]
+
+BATMAN_WALK_B = [
+    "....KKKK........",
+    "...KKKKKK.......",
+    "..KK.KK.KK......",
+    "..KKKKKKKK......",
+    "...KSSSSK.......",
+    "...SSSSSSS......",
+    "..KKSSSSKK......",
+    ".KKKKKKKKK......",
+    "KKKYYKKYYKKK....",
+    "KKKKKKKKKKKK....",
+    "KKKKKKKKKKKK....",
+    ".K.KKKKKK.K.....",
+    "....KKKK........",
+    "....KKKK........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....KKKK........",
+    "...KKKKKK.......",
+    "..KKK..KKK......",
+    ".KK......KK.....",
+]
+
+BATMAN_JUMP = [
+    "....KKKK........",
+    "...KKKKKK.......",
+    "..KK.KK.KK......",
+    "..KKKKKKKK......",
+    "...KSSSSK.......",
+    "...SSSSSSS......",
+    "..KKSSSSKK......",
+    ".KKKKKKKKK..KK..",
+    "KKKYYKKYYKKKKKK.",
+    "KKKKKKKKKKKKKK..",
+    "KKK.KKKK.KKK....",
+    ".K..KKKK..K.....",
+    "....KKKK........",
+    "....KKKK........",
+    "...KK..KK.......",
+    "..KK....KK......",
+    ".KK......KK.....",
+    "KK........KK....",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+]
+
+BATMAN_PUNCH = [
+    "....KKKK........",
+    "...KKKKKK.......",
+    "..KK.KK.KK......",
+    "..KKKKKKKK......",
+    "...KSSSSK.......",
+    "...SSSSSSS......",
+    "..KKSSSSKKKKK...",
+    ".KKKKKKKKKSSSK..",
+    "KKKYYKKYYKKKKKK.",
+    "KKKKKKKKKKKKKK..",
+    "KKK.KKKK.KK.....",
+    ".K..KKKK..K.....",
+    "....KKKK........",
+    "....KKKK........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "...KK..KK.......",
+    "...KK..KK.......",
+    "..KKK..KKK......",
+]
+
+BATMAN_KICK = [
+    "....KKKK........",
+    "...KKKKKK.......",
+    "..KK.KK.KK......",
+    "..KKKKKKKK......",
+    "...KSSSSK.......",
+    "...SSSSSSS......",
+    "..KKSSSSKK......",
+    ".KKKKKKKKK......",
+    "KKKYYKKYYKKK....",
+    "KKKKKKKKKKKK....",
+    "KKK.KKKK.KKK....",
+    ".K..KKKK..K.....",
+    "....KKKK........",
+    "....KKKKKK......",
+    "....K..KKKK.....",
+    "....K..KKKKK....",
+    "....K..K..KK....",
+    "...KK..K....KK..",
+    "..KK..KK....KKK.",
+    ".KKK..KK......KK",
+    "KK....KK........",
+    "K....KK.........",
+    "....KKK.........",
+    "...KK...........",
+]
+
+BATMAN_THROW = [
+    "....KKKK........",
+    "...KKKKKK.......",
+    "..KK.KK.KK......",
+    "..KKKKKKKK......",
+    "...KSSSSK.......",
+    "...SSSSSSS......",
+    "..KKSSSSKK......",
+    ".KKKKKKKKKKK....",
+    "KKKYYKKYYKKSK...",
+    "KKKKKKKKKKKKK...",
+    "KKK.KKKK.KKK....",
+    ".K..KKKK..K.....",
+    "....KKKK........",
+    "....KKKK........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "....K..K........",
+    "...KK..KK.......",
+    "...KK..KK.......",
+    "..KKK..KKK......",
+]
+
+BATMAN_HURT = [
+    "....KKKK........",
+    "...KKKKKK.......",
+    "..KK.KK.KK......",
+    "..KKKKKKKK......",
+    "...KSSSSK.......",
+    "...SROOORS......",
+    "..KKSSSSKK......",
+    ".KKKKKKKKK......",
+    "KKKYYKKYYKKK....",
+    "KKKKKKKKKKKK....",
+    "KKK.KKKK.KKK....",
+    ".K..KKKK..K.....",
+    "....KKKK........",
+    "....KKKK........",
+    "...K..K.K.......",
+    "..K...K..K......",
+    ".K....K...K.....",
+    ".K....K...K.....",
+    "K.....K....K....",
+    "K.....K....K....",
+    "K....KK....K....",
+    ".KK..KK...KK....",
+    ".KK..KK...KK....",
+    "..KKK..KKKK.....",
+]
+
+# ----------------------------------------------------------------------
+# Enemies (16x24 unless noted)
+# ----------------------------------------------------------------------
+
+CLOWN_BASHER_A = [
+    "....RRRR........",
+    "...RRWWRR.......",
+    "..RR.WW.RR......",
+    "..RRWWWWRR......",
+    "..WWSSSSWW......",
+    ".W.SKSSKS.W.....",
+    ".W.SSSSSS.W.....",
+    "..W.SOOS.W......",
+    "...WSSSSW.......",
+    "..WMMWWMMW......",
+    ".WMMMMMMMMW.....",
+    "WMMMMMMMMMMW....",
+    "WMMMYMMMYMMW....",
+    "WMMMMMMMMMMW....",
+    ".WMMMMMMMMW.....",
+    "..MMMM.MMMM.....",
+    "..MMMM.MMMM.....",
+    "..MM....MM......",
+    "..MM....MM......",
+    ".MMM....MMM.....",
+    ".LL......LL.....",
+    ".LL......LL.....",
+    "LLLL....LLLL....",
+    "LLLL....LLLL....",
+]
+
+CLOWN_BASHER_B = [
+    "....RRRR........",
+    "...RRWWRR.......",
+    "..RR.WW.RR......",
+    "..RRWWWWRR......",
+    "..WWSSSSWW......",
+    ".W.SKSSKS.W.....",
+    ".W.SSSSSS.W.....",
+    "..W.SOOS.W......",
+    "...WSSSSW.......",
+    "..WMMWWMMW......",
+    ".WMMMMMMMMW.....",
+    "WMMMMMMMMMMW....",
+    "WMMMYMMMYMMW....",
+    "WMMMMMMMMMMW....",
+    ".WMMMMMMMMW.....",
+    ".MMMMM.MMM......",
+    "MMMMMM.MMM......",
+    "MMM.....MMM.....",
+    "MMM.....MMM.....",
+    "MMMM.....MMM....",
+    "LLL......LLL....",
+    "LLL......LLL....",
+    "LLLL.....LLL....",
+    "LLLL.....LLL....",
+]
+
+JACK_IN_BOX_CLOSED = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "PPPPPPPPPPPPPPPP",
+    "PYYPPPPPPPPPPYYP",
+    "PYYPMMPPPPMMPYYP",
+    "PPPPMMPPPPMMPPPP",
+    "PPPPPPPPPPPPPPPP",
+    "PPPPPPMPPPPPPPPP",
+    "PPPPPPMPPPPPPPPP",
+    "PPPPPMMPPPPPPPPP",
+    "PPPPPPPPPPPPPPPP",
+    "PPPPPPPPPPPPPPPP",
+    "PPPPPPPPPPPPPPPP",
+]
+
+JACK_IN_BOX_OPEN = [
+    "....RRRRR.......",
+    "...RWRRRWR......",
+    "..RRWRWRWRR.....",
+    "..RWSWSWSWR.....",
+    "..WSSKSKSSW.....",
+    "..WSSSSSSSW.....",
+    "..WSOOOOOSW.....",
+    "..WSSSSSSSW.....",
+    "..WMMMMMMMW.....",
+    "..MWMWMWMWM.....",
+    "..MMMMMMMMM.....",
+    "...MMMMMMM......",
+    "....MMMMM.......",
+    "PPPPMMMMMPPPPPPP",
+    "PYYPMMMMMPPPPYYP",
+    "PYYPMMPPPPMMPYYP",
+    "PPPPMMPPPPMMPPPP",
+    "PPPPPPPPPPPPPPPP",
+    "PPPPPPMPPPPPPPPP",
+    "PPPPPPMPPPPPPPPP",
+    "PPPPPMMPPPPPPPPP",
+    "PPPPPPPPPPPPPPPP",
+    "PPPPPPPPPPPPPPPP",
+    "PPPPPPPPPPPPPPPP",
+]
+
+FIREBREATHER = [
+    "....RRRR........",
+    "...RRWWRR.......",
+    "..RR.WW.RR......",
+    "..RRWWWWRR......",
+    "..WWSSSSWW......",
+    ".W.SKSSKS.W.....",
+    ".W.SSSSSS.W.....",
+    "..W.SOO..W......",
+    "...WSSOOO.......",
+    "..WOOOOOOOO.....",
+    ".WOOOYYYOOOOOO..",
+    "WOOOYYYYOOOOOOY.",
+    "WOOOYYYYOOOOY...",
+    "WOOOOOOOOOO.....",
+    ".WOOOOOOOO......",
+    "..OOOO.OOOO.....",
+    "..MMMM.MMMM.....",
+    "..MM....MM......",
+    "..MM....MM......",
+    ".MMM....MMM.....",
+    ".LL......LL.....",
+    ".LL......LL.....",
+    "LLLL....LLLL....",
+    "LLLL....LLLL....",
+]
+
+KNIFER = [
+    "....NNNN........",
+    "...NNDDNN.......",
+    "..NN.DD.NN......",
+    "..NNDDDDNN......",
+    "..DDSSSSDD......",
+    ".D.SKSSKS.D.....",
+    ".D.SSSSSS.D.....",
+    "..D.SLLS.D......",
+    "...DSSSSD.......",
+    "..NNDDDDNN......",
+    ".NNNDDDDNNNL....",
+    "NNNNDDDDNNNNL...",
+    "NNNNDDDDNNNN....",
+    "NNNNDDDDNNNN....",
+    ".NNNDDDDNNN.....",
+    "..NNNN.NNNN.....",
+    "..NNNN.NNNN.....",
+    "..NN....NN......",
+    "..NN....NN......",
+    ".NNN....NNN.....",
+    ".LL......LL.....",
+    ".LL......LL.....",
+    "LLLL....LLLL....",
+    "LLLL....LLLL....",
+]
+
+# Penguin boss is bigger (24x32)
+PENGUIN_BOSS = [
+    "........KKKKKKKK........",
+    ".......KKKKKKKKKK.......",
+    "......KKKKKKKKKKKK......",
+    "......KKKWWKKWWKKK......",
+    ".....KKKWLLWWLLWKKK.....",
+    ".....KKKWLLWWLLWKKK.....",
+    "......KKKKKKKKKKKK......",
+    ".......KKOOOOOOKK.......",
+    "......KKKOOOOOOKKK......",
+    ".....KKKKKOOOOKKKKK.....",
+    "....KKKKWWWWWWWKKKKK....",
+    "...KKKWWWWWWWWWWWKKK....",
+    "..KKKWWWWWWWWWWWWWKKK...",
+    "..KKWWWWWKKKKKWWWWKKK...",
+    ".KKKWWWWKKKKKKKWWWWKKK..",
+    ".KKWWWWWKYYYYYKWWWWWKK..",
+    ".KKWWWWWKKKKKKKWWWWWKK..",
+    ".KKWWWWWWKKKKKWWWWWWKK..",
+    ".KKWWWWWWWWWWWWWWWWWKK..",
+    "..KKWWWWWWWWWWWWWWWKK...",
+    "..KKKWWWWWWWWWWWWWKKK...",
+    "...KKKWWWWWWWWWWWKKK....",
+    "....KKKKWWWWWWWKKKK.....",
+    ".....KKKKKKKKKKKKK......",
+    "......KKKKKKKKKKK.......",
+    ".....KKKK....KKKKK......",
+    "....KKKK......KKKK......",
+    "...OOOO........OOOO.....",
+    "..OOOO..........OOOO....",
+    "..OO.............OOO....",
+    ".OOO..............OO....",
+    "OOOO..............OOO...",
+]
+
+# ----------------------------------------------------------------------
+# Projectiles & FX (small)
+# ----------------------------------------------------------------------
+
+BATARANG = [
+    "..KK..KK..",
+    ".KKKKKKKK.",
+    "KK.KKKK.KK",
+    "K..KKKK..K",
+    "KKKKKKKKKK",
+    "K..KKKK..K",
+    "KK.KKKK.KK",
+    ".KKKKKKKK.",
+    "..KK..KK..",
+]
+
+KNIFE_PROJ = [
+    "L.......",
+    "LL......",
+    "LLL.....",
+    "LLLL....",
+    "LLLLL...",
+    ".LLLLD..",
+    "..LLDD..",
+    "...DDD..",
+]
+
+FIRE_PROJ = [
+    ".YYY.....",
+    "YYOOY....",
+    "YOOROY...",
+    "YOROOY...",
+    ".YOOY....",
+    "..YY.....",
+]
+
+# ----------------------------------------------------------------------
+# Tile / scenery (16x16)
+# ----------------------------------------------------------------------
+
+TILE_GROUND = [
+    "GGGGGGGGGGGGGGGG",
+    "GLLGGGLLGGGLLGGG",
+    "GGGGGGGGGGGGGGGG",
+    "GGGLLGGGLLGGGLLG",
+    "GGGGGGGGGGGGGGGG",
+    "GLLGGGLLGGGLLGGG",
+    "GDGGGGGGDGGGGGGG",
+    "DDDDDDDDDDDDDDDD",
+    "DDDDDDDDDDDDDDDD",
+    "DDDDDDDDDDDDDDDD",
+    "KDDDDDDDDDDDDDDD",
+    "KKDDDDDDDDDDDDDD",
+    "KKKDDDDDDDDDDDDD",
+    "KKKKDDDDDDDDDDDD",
+    "KKKKKDDDDDDDDDDD",
+    "KKKKKKKKKKKKKKKK",
+]
+
+TILE_BRICK = [
+    "BBBBBBBBBBBBBBBB",
+    "BDDDDDDDDDDDDDDB",
+    "BDDDDDDDDDDDDDDB",
+    "BDDDDDDDDDDDDDDB",
+    "BBBBBBBBBBBBBBBB",
+    "BDDDDDDDDDDDDDDB",
+    "BDDDDDDDDDDDDDDB",
+    "BBBBBBBBBBBBBBBB",
+    "BBBBBBBBBBBBBBBB",
+    "BDDDDDDDDDDDDDDB",
+    "BDDDDDDDDDDDDDDB",
+    "BDDDDDDDDDDDDDDB",
+    "BBBBBBBBBBBBBBBB",
+    "BDDDDDDDDDDDDDDB",
+    "BDDDDDDDDDDDDDDB",
+    "BBBBBBBBBBBBBBBB",
+]
+
+TILE_SNOW = [
+    "QQQQQQQQQQQQQQQQ",
+    "QWWWWWWWQQQWWWQQ",
+    "WWWWWWWWWWWWWWWQ",
+    "WLLLLLLWWWLLWWLW",
+    "WLLLLLLWWWLLWWLW",
+    "WLLLLLLLLLLLLLLL",
+    "LLLLLLLLLLLLLLLL",
+    "LLLLLLLLLLLLLLLL",
+    "LLLLLLLLLLLLLLLL",
+    "LLLLLLLLLLLLLLLL",
+    "LLGLGLGLGLGGLLGL",
+    "LGLLLGLGGLGLGLGL",
+    "GLLGLLGLGLLLGGLG",
+    "GGGGGGGGGGGGGGGG",
+    "DGGGDGGGDGGGGGDG",
+    "DDDDDDDDDDDDDDDD",
+]
+
+
+# ----------------------------------------------------------------------
+# Cache: build sprites once, mirror lazily
+# ----------------------------------------------------------------------
+
+@cache
+def get(name: str) -> pygame.Surface:
+    """Return the named sprite surface (built lazily, cached)."""
+    grid = SPRITE_REGISTRY[name]
+    return make_sprite(grid)
+
+
+@cache
+def get_flipped(name: str) -> pygame.Surface:
+    return pygame.transform.flip(get(name), True, False)
+
+
+SPRITE_REGISTRY: dict[str, list[str]] = {
+    "batman_idle": BATMAN_IDLE,
+    "batman_walk_a": BATMAN_WALK_A,
+    "batman_walk_b": BATMAN_WALK_B,
+    "batman_jump": BATMAN_JUMP,
+    "batman_punch": BATMAN_PUNCH,
+    "batman_kick": BATMAN_KICK,
+    "batman_throw": BATMAN_THROW,
+    "batman_hurt": BATMAN_HURT,
+    "clown_a": CLOWN_BASHER_A,
+    "clown_b": CLOWN_BASHER_B,
+    "jack_closed": JACK_IN_BOX_CLOSED,
+    "jack_open": JACK_IN_BOX_OPEN,
+    "firebreather": FIREBREATHER,
+    "knifer": KNIFER,
+    "penguin": PENGUIN_BOSS,
+    "batarang": BATARANG,
+    "knife_proj": KNIFE_PROJ,
+    "fire_proj": FIRE_PROJ,
+    "tile_ground": TILE_GROUND,
+    "tile_brick": TILE_BRICK,
+    "tile_snow": TILE_SNOW,
+}

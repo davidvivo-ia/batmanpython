@@ -1,0 +1,618 @@
+"""Entities: Batman, enemies, projectiles. Modern dataclass-based.
+
+Inspired by the Sega CD source structure (PLAYER.68K, OBJECT.68K, BASHER.68K,
+JACKNBOX.68K, FIRETRUC.68K, VILLAN.68K). We don't replicate the bytecode —
+just the silhouette of behaviours.
+"""
+
+from __future__ import annotations
+
+import math
+import random
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Self
+
+import pygame
+
+from . import audio, sprites
+from .constants import (
+    BATARANG_DAMAGE,
+    EnemyKind,
+    Facing,
+    GRAVITY,
+    GROUND_Y,
+    HITSTUN_FRAMES,
+    IFRAMES,
+    JUMP_SPEED,
+    KICK_DAMAGE,
+    KICK_FRAMES,
+    PALETTE,
+    PLAYER_MAX_HP,
+    PUNCH_DAMAGE,
+    PUNCH_FRAMES,
+    PlayerState,
+    RUN_SPEED,
+    SCORE_BOSS,
+    SCORE_ENEMY,
+    SCORE_MIDBOSS,
+    WALK_SPEED,
+)
+
+if TYPE_CHECKING:
+    from .level import Level
+
+
+# ----------------------------------------------------------------------
+# Base sprite / hitbox helpers
+# ----------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class Hitbox:
+    """Rectangular AABB in world space."""
+    x: float
+    y: float
+    w: int
+    h: int
+
+    @property
+    def rect(self) -> pygame.Rect:
+        return pygame.Rect(int(self.x), int(self.y), self.w, self.h)
+
+    def intersects(self, other: Self | Hitbox) -> bool:
+        return self.rect.colliderect(other.rect)
+
+
+# ----------------------------------------------------------------------
+# Player
+# ----------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class Player:
+    x: float
+    y: float = GROUND_Y - 24
+    vx: float = 0.0
+    vy: float = 0.0
+    on_ground: bool = True
+    facing: Facing = Facing.RIGHT
+    state: PlayerState = PlayerState.IDLE
+    state_timer: int = 0
+    iframes: int = 0
+    hp: int = PLAYER_MAX_HP
+    lives: int = 3
+    batarangs: int = 5
+    score: int = 0
+    walk_anim: float = 0.0
+    next_extra_life: int = 20_000
+    queued_throw: bool = False
+
+    W: int = 12
+    H: int = 24
+
+    @property
+    def hitbox(self) -> Hitbox:
+        return Hitbox(self.x - self.W / 2, self.y, self.W, self.H)
+
+    @property
+    def attack_hitbox(self) -> Hitbox | None:
+        if self.state is PlayerState.PUNCH:
+            ax = self.x + self.facing * 6
+            return Hitbox(ax - 6, self.y + 4, 14, 12)
+        if self.state is PlayerState.KICK:
+            ax = self.x + self.facing * 8
+            return Hitbox(ax - 6, self.y + 12, 18, 10)
+        return None
+
+    @property
+    def attack_damage(self) -> int:
+        match self.state:
+            case PlayerState.PUNCH:
+                return PUNCH_DAMAGE
+            case PlayerState.KICK:
+                return KICK_DAMAGE
+            case _:
+                return 0
+
+    # ------------------------------------------------------------------
+    def update(self, keys: pygame.key.ScancodeWrapper, level: Level) -> None:
+        if self.state is PlayerState.DEAD:
+            self.vy += GRAVITY
+            self.y += self.vy
+            return
+
+        attacking = self.state in {PlayerState.PUNCH, PlayerState.KICK, PlayerState.THROW}
+        # Horizontal input
+        ax = 0.0
+        if not attacking or not self.on_ground:
+            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+                ax -= 1
+                self.facing = Facing.LEFT
+            if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+                ax += 1
+                self.facing = Facing.RIGHT
+        speed = RUN_SPEED if (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]) else WALK_SPEED
+        self.vx = ax * speed
+
+        # Gravity
+        self.vy += GRAVITY
+        self.y += self.vy
+        self.x += self.vx
+
+        # Ground collision
+        if self.y >= GROUND_Y - self.H:
+            self.y = GROUND_Y - self.H
+            self.vy = 0
+            if not self.on_ground:
+                # landed
+                if self.state is PlayerState.JUMP:
+                    self.state = PlayerState.IDLE
+            self.on_ground = True
+        else:
+            self.on_ground = False
+
+        # World bounds
+        self.x = max(8, min(self.x, level.width_px - 8))
+
+        # State machine timing
+        if self.state_timer > 0:
+            self.state_timer -= 1
+            if self.state_timer == 0 and self.state in {
+                PlayerState.PUNCH, PlayerState.KICK, PlayerState.THROW, PlayerState.HURT,
+            }:
+                self.state = PlayerState.IDLE
+        if self.iframes > 0:
+            self.iframes -= 1
+
+        # Determine animation state if not locked
+        if self.state in {PlayerState.IDLE, PlayerState.WALK, PlayerState.JUMP}:
+            if not self.on_ground:
+                self.state = PlayerState.JUMP
+            elif abs(self.vx) > 0.1:
+                self.state = PlayerState.WALK
+                self.walk_anim += abs(self.vx) * 0.15
+            else:
+                self.state = PlayerState.IDLE
+
+    # ------------------------------------------------------------------
+    def try_jump(self) -> None:
+        if self.on_ground and self.state not in {PlayerState.HURT, PlayerState.DEAD}:
+            self.vy = JUMP_SPEED
+            self.on_ground = False
+            self.state = PlayerState.JUMP
+            audio.jump().play()
+
+    def try_punch(self) -> None:
+        if self.state in {PlayerState.IDLE, PlayerState.WALK} and self.on_ground:
+            self.state = PlayerState.PUNCH
+            self.state_timer = PUNCH_FRAMES
+            audio.punch().play()
+
+    def try_kick(self) -> None:
+        if self.state in {PlayerState.IDLE, PlayerState.WALK} and self.on_ground:
+            self.state = PlayerState.KICK
+            self.state_timer = KICK_FRAMES
+            audio.kick().play()
+
+    def try_throw(self) -> Batarang | None:
+        if self.batarangs <= 0:
+            return None
+        if self.state not in {PlayerState.IDLE, PlayerState.WALK, PlayerState.JUMP}:
+            return None
+        self.batarangs -= 1
+        self.state = PlayerState.THROW
+        self.state_timer = 14
+        audio.batarang().play()
+        return Batarang(
+            x=self.x + self.facing * 10,
+            y=self.y + 8,
+            vx=4.5 * self.facing,
+        )
+
+    def take_damage(self, dmg: int) -> None:
+        if self.iframes > 0 or self.state is PlayerState.DEAD:
+            return
+        self.hp -= dmg
+        self.iframes = IFRAMES
+        if self.hp <= 0:
+            self.lives -= 1
+            audio.death().play()
+            if self.lives <= 0:
+                self.state = PlayerState.DEAD
+                self.state_timer = 120
+                self.vy = -6
+            else:
+                self.hp = PLAYER_MAX_HP
+                self.state = PlayerState.HURT
+                self.state_timer = HITSTUN_FRAMES
+                self.vy = -3
+                audio.hurt().play()
+        else:
+            self.state = PlayerState.HURT
+            self.state_timer = HITSTUN_FRAMES
+            self.vy = -2.5
+            audio.hurt().play()
+
+    def add_score(self, pts: int) -> None:
+        self.score += pts
+        if self.score >= self.next_extra_life:
+            self.lives += 1
+            self.next_extra_life += 20_000
+            audio.pickup().play()
+
+    # ------------------------------------------------------------------
+    def draw(self, surf: pygame.Surface, level: Level) -> None:
+        sprite_name = self._sprite_name()
+        getter = sprites.get_flipped if self.facing is Facing.LEFT else sprites.get
+        img = getter(sprite_name)
+        # Flicker on i-frames
+        if self.iframes and self.iframes % 4 < 2:
+            return
+        sx = level.world_to_screen(self.x) - img.get_width() // 2
+        sy = int(self.y) - 0
+        surf.blit(img, (sx, sy))
+
+    def _sprite_name(self) -> str:
+        match self.state:
+            case PlayerState.IDLE:
+                return "batman_idle"
+            case PlayerState.WALK:
+                return "batman_walk_a" if int(self.walk_anim) % 2 == 0 else "batman_walk_b"
+            case PlayerState.JUMP:
+                return "batman_jump"
+            case PlayerState.PUNCH:
+                return "batman_punch"
+            case PlayerState.KICK:
+                return "batman_kick"
+            case PlayerState.THROW:
+                return "batman_throw"
+            case PlayerState.HURT | PlayerState.DEAD:
+                return "batman_hurt"
+
+
+# ----------------------------------------------------------------------
+# Projectiles
+# ----------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class Batarang:
+    x: float
+    y: float
+    vx: float
+    spin: float = 0.0
+    alive: bool = True
+    damage: int = BATARANG_DAMAGE
+    life: int = 90  # frames
+
+    def update(self, level: Level) -> None:
+        self.x += self.vx
+        self.spin += 0.6
+        self.life -= 1
+        if self.life <= 0 or self.x < level.cam_x - 32 or self.x > level.cam_x + 360:
+            self.alive = False
+
+    def draw(self, surf: pygame.Surface, level: Level) -> None:
+        img = sprites.get("batarang")
+        rotated = pygame.transform.rotate(img, self.spin * 30 % 360)
+        rect = rotated.get_rect(center=(level.world_to_screen(self.x), int(self.y)))
+        surf.blit(rotated, rect)
+
+    @property
+    def hitbox(self) -> Hitbox:
+        return Hitbox(self.x - 5, self.y - 5, 10, 10)
+
+
+@dataclass(slots=True)
+class EnemyProjectile:
+    x: float
+    y: float
+    vx: float
+    vy: float
+    sprite: str
+    damage: int = 15
+    alive: bool = True
+    life: int = 120
+
+    def update(self, level: Level) -> None:
+        self.x += self.vx
+        self.y += self.vy
+        self.life -= 1
+        if self.life <= 0 or self.x < level.cam_x - 32 or self.x > level.cam_x + 360:
+            self.alive = False
+
+    def draw(self, surf: pygame.Surface, level: Level) -> None:
+        img = sprites.get(self.sprite)
+        if self.vx < 0:
+            img = pygame.transform.flip(img, True, False)
+        surf.blit(img, (level.world_to_screen(self.x), int(self.y)))
+
+    @property
+    def hitbox(self) -> Hitbox:
+        return Hitbox(self.x, self.y, 8, 8)
+
+
+# ----------------------------------------------------------------------
+# Enemies
+# ----------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class Enemy:
+    kind: EnemyKind
+    x: float
+    y: float
+    hp: int = 50
+    max_hp: int = 50
+    vx: float = 0.0
+    vy: float = 0.0
+    on_ground: bool = True
+    facing: Facing = Facing.LEFT
+    state_timer: int = 0
+    attack_cooldown: int = 0
+    score_value: int = SCORE_ENEMY
+    alive: bool = True
+    iframes: int = 0
+    walk_anim: float = 0.0
+    activated: bool = True   # jack-in-the-box starts inactive
+    contact_damage: int = 12
+    W: int = 14
+    H: int = 24
+    boss: bool = False
+
+    @classmethod
+    def spawn(cls, kind: EnemyKind, x: float, y: float) -> Enemy:
+        match kind:
+            case EnemyKind.BASHER:
+                return cls(kind, x, y, hp=40, max_hp=40, contact_damage=10)
+            case EnemyKind.JACKBOX:
+                return cls(
+                    kind, x, GROUND_Y - 24, hp=20, max_hp=20,
+                    activated=False, contact_damage=18, score_value=200,
+                )
+            case EnemyKind.FIREBREATHER:
+                return cls(kind, x, y, hp=60, max_hp=60, contact_damage=14)
+            case EnemyKind.KNIFER:
+                return cls(kind, x, y, hp=35, max_hp=35, contact_damage=8)
+            case EnemyKind.BOSS_PENGUIN:
+                return cls(
+                    kind, x, GROUND_Y - 32, hp=400, max_hp=400, W=24, H=32,
+                    contact_damage=20, score_value=SCORE_BOSS, boss=True,
+                )
+        raise ValueError(kind)
+
+    @property
+    def hitbox(self) -> Hitbox:
+        return Hitbox(self.x - self.W / 2, self.y, self.W, self.H)
+
+    # ------------------------------------------------------------------
+    def update(self, player: Player, level: Level) -> EnemyProjectile | None:
+        if self.iframes:
+            self.iframes -= 1
+        if self.state_timer > 0:
+            self.state_timer -= 1
+        if self.attack_cooldown > 0:
+            self.attack_cooldown -= 1
+
+        match self.kind:
+            case EnemyKind.BASHER:
+                return self._update_basher(player)
+            case EnemyKind.JACKBOX:
+                return self._update_jack(player)
+            case EnemyKind.FIREBREATHER:
+                return self._update_fire(player)
+            case EnemyKind.KNIFER:
+                return self._update_knifer(player)
+            case EnemyKind.BOSS_PENGUIN:
+                return self._update_boss(player, level)
+
+    def _walk_toward(self, player: Player, speed: float = 1.1) -> None:
+        if player.x < self.x:
+            self.vx = -speed
+            self.facing = Facing.LEFT
+        else:
+            self.vx = speed
+            self.facing = Facing.RIGHT
+        self.x += self.vx
+        self.walk_anim += abs(self.vx) * 0.15
+
+    def _update_basher(self, player: Player) -> None:
+        dx = player.x - self.x
+        if abs(dx) > 16:
+            self._walk_toward(player, 1.0)
+        else:
+            self.vx = 0
+            if self.attack_cooldown <= 0 and abs(player.y - self.y) < 24:
+                self.attack_cooldown = 60
+                # Contact damage handled by overlap; just freeze briefly
+                self.state_timer = 12
+        return None
+
+    def _update_jack(self, player: Player) -> EnemyProjectile | None:
+        # Triggers when player walks within 24 pixels horizontally
+        if not self.activated:
+            if abs(player.x - self.x) < 24:
+                self.activated = True
+                self.state_timer = 30
+                audio.boss_roar().play()
+            return None
+        # Once activated, idle hostile
+        if self.attack_cooldown <= 0 and abs(player.x - self.x) < 80:
+            self.attack_cooldown = 110
+            return EnemyProjectile(
+                x=self.x, y=self.y - 4,
+                vx=2.4 * (1 if player.x > self.x else -1),
+                vy=-1.5,
+                sprite="knife_proj", damage=12,
+            )
+        return None
+
+    def _update_fire(self, player: Player) -> EnemyProjectile | None:
+        dx = player.x - self.x
+        if abs(dx) > 60:
+            self._walk_toward(player, 0.6)
+        else:
+            self.vx = 0
+            self.facing = Facing.LEFT if dx < 0 else Facing.RIGHT
+            if self.attack_cooldown <= 0:
+                self.attack_cooldown = 80
+                audio.fire().play()
+                return EnemyProjectile(
+                    x=self.x + self.facing * 10, y=self.y + 8,
+                    vx=2.0 * self.facing, vy=0,
+                    sprite="fire_proj", damage=15, life=60,
+                )
+        return None
+
+    def _update_knifer(self, player: Player) -> EnemyProjectile | None:
+        dx = player.x - self.x
+        # Keep distance
+        target = 90
+        if abs(dx) < target - 10:
+            self.vx = -1.2 if dx > 0 else 1.2
+            self.x += self.vx
+            self.facing = Facing.LEFT if dx < 0 else Facing.RIGHT
+        elif abs(dx) > target + 10:
+            self._walk_toward(player, 0.9)
+        else:
+            self.vx = 0
+            self.facing = Facing.LEFT if dx < 0 else Facing.RIGHT
+            if self.attack_cooldown <= 0:
+                self.attack_cooldown = 90
+                return EnemyProjectile(
+                    x=self.x, y=self.y + 6,
+                    vx=3.2 * self.facing, vy=-0.5,
+                    sprite="knife_proj", damage=12, life=120,
+                )
+        return None
+
+    def _update_boss(self, player: Player, level: Level) -> EnemyProjectile | None:
+        # Penguin paces left-right and lobs knives
+        self.walk_anim += 0.05
+        self.vx = math.sin(self.walk_anim) * 1.2
+        self.x += self.vx
+        self.facing = Facing.LEFT if player.x < self.x else Facing.RIGHT
+        self.x = max(level.cam_x + 40, min(self.x, level.cam_x + 280))
+        if self.attack_cooldown <= 0:
+            self.attack_cooldown = 50
+            return EnemyProjectile(
+                x=self.x, y=self.y + 6,
+                vx=2.6 * (1 if player.x > self.x else -1),
+                vy=-2.0,
+                sprite="knife_proj", damage=14, life=140,
+            )
+        return None
+
+    # ------------------------------------------------------------------
+    def take_damage(self, dmg: int, knockback: float = 0) -> bool:
+        """Returns True if killed."""
+        if self.iframes > 0 or not self.alive:
+            return False
+        self.hp -= dmg
+        self.iframes = 8
+        self.x += knockback
+        audio.hit().play()
+        if self.hp <= 0:
+            self.alive = False
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    def draw(self, surf: pygame.Surface, level: Level) -> None:
+        if not self.alive:
+            return
+        sprite_name = self._sprite_name()
+        if sprite_name is None:
+            return
+        getter = sprites.get_flipped if self.facing is Facing.RIGHT else sprites.get
+        img = getter(sprite_name)
+        if self.iframes and self.iframes % 2 == 0:
+            tinted = img.copy()
+            tinted.fill((255, 80, 80, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            img = tinted
+        sx = level.world_to_screen(self.x) - img.get_width() // 2
+        sy = int(self.y)
+        surf.blit(img, (sx, sy))
+        # Boss healthbar
+        if self.boss:
+            self._draw_boss_hp(surf)
+
+    def _sprite_name(self) -> str | None:
+        match self.kind:
+            case EnemyKind.BASHER:
+                return "clown_a" if int(self.walk_anim) % 2 == 0 else "clown_b"
+            case EnemyKind.JACKBOX:
+                return "jack_open" if self.activated else "jack_closed"
+            case EnemyKind.FIREBREATHER:
+                return "firebreather"
+            case EnemyKind.KNIFER:
+                return "knifer"
+            case EnemyKind.BOSS_PENGUIN:
+                return "penguin"
+
+    def _draw_boss_hp(self, surf: pygame.Surface) -> None:
+        from .constants import NATIVE_W
+        bar_w = 240
+        bar_x = (NATIVE_W - bar_w) // 2
+        bar_y = 8
+        pygame.draw.rect(surf, PALETTE["dark"], (bar_x - 2, bar_y - 2, bar_w + 4, 8))
+        ratio = max(0.0, self.hp / self.max_hp)
+        pygame.draw.rect(surf, PALETTE["red"], (bar_x, bar_y, int(bar_w * ratio), 4))
+        pygame.draw.rect(surf, PALETTE["white"], (bar_x, bar_y, bar_w, 4), 1)
+
+
+# ----------------------------------------------------------------------
+# Pickups
+# ----------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class Pickup:
+    kind: str  # "batarang" | "health" | "1up"
+    x: float
+    y: float
+    bob: float = 0.0
+    alive: bool = True
+
+    @property
+    def hitbox(self) -> Hitbox:
+        return Hitbox(self.x - 6, self.y - 6, 12, 12)
+
+    def update(self) -> None:
+        self.bob += 0.1
+
+    def apply(self, player: Player) -> None:
+        match self.kind:
+            case "batarang":
+                player.batarangs += 3
+            case "health":
+                player.hp = min(PLAYER_MAX_HP, player.hp + 40)
+            case "1up":
+                player.lives += 1
+        audio.pickup().play()
+        self.alive = False
+
+    def draw(self, surf: pygame.Surface, level: Level) -> None:
+        if not self.alive:
+            return
+        sx = level.world_to_screen(self.x)
+        sy = int(self.y + math.sin(self.bob) * 2)
+        match self.kind:
+            case "batarang":
+                surf.blit(sprites.get("batarang"), (sx - 5, sy - 4))
+            case "health":
+                pygame.draw.rect(surf, PALETTE["red"], (sx - 5, sy - 5, 10, 10))
+                pygame.draw.rect(surf, PALETTE["white"], (sx - 1, sy - 4, 2, 8))
+                pygame.draw.rect(surf, PALETTE["white"], (sx - 4, sy - 1, 8, 2))
+            case "1up":
+                pygame.draw.rect(surf, PALETTE["green"], (sx - 6, sy - 5, 12, 10))
+
+
+def random_pickup(x: float, rng: random.Random | None = None) -> Pickup:
+    rng = rng or random
+    roll = rng.random()
+    if roll < 0.55:
+        return Pickup("health", x, GROUND_Y - 8)
+    if roll < 0.9:
+        return Pickup("batarang", x, GROUND_Y - 8)
+    return Pickup("1up", x, GROUND_Y - 8)
