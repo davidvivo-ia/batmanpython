@@ -83,6 +83,18 @@ class PlayerState(StrEnum):
     THROW = auto()
     HURT = auto()
     DEAD = auto()
+    SLIDE = auto()
+    DIVEKICK = auto()
+
+
+# Combo system: chained hits within COMBO_WINDOW frames build multiplier.
+COMBO_WINDOW: Final = 90  # 1.5s
+COMBO_DAMAGE_BONUS: Final = 0.15  # +15% per combo step
+COMBO_SCORE_BONUS: Final = 0.25
+DIVEKICK_DAMAGE: Final = 50
+SLIDE_DAMAGE: Final = 30
+SLIDE_SPEED: Final = 5.0
+SLIDE_FRAMES: Final = 22
 
 
 class Facing(IntEnum):

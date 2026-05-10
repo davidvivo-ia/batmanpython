@@ -139,21 +139,27 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
     atk = p.attack_hitbox
     if atk is not None:
         dmg = p.attack_damage
+        any_hit = False
         for e in world.enemies:
             if e.alive and atk.intersects(e.hitbox):
+                any_hit = True
                 kb = 4.0 * p.facing
                 cx, cy = e.x, e.y + e.H / 2
                 world.particles.burst_hit(cx, cy)
                 world.shake.kick(2.5)
                 killed = e.take_damage(dmg, knockback=kb)
                 if killed:
-                    pts = e.score_value
+                    pts = p.combo_score_bonus(e.score_value)
                     _award(world, pts, e.x, e.y)
                     world.particles.burst_blood(cx, cy, dir_sign=p.facing)
                     world.shake.kick(5.0)
                     world.freeze.kick(3 if not e.boss else 8)
                     if e.boss:
                         world.boss_defeated = True
+        if any_hit:
+            p.register_combo_hit()
+            if p.combo >= 3:
+                world.floats.emit(f"{p.combo}X COMBO!", p.x, p.y - 20, PALETTE["yellow"])
 
     # Batarang vs enemies
     for b in world.batarangs:
@@ -351,6 +357,8 @@ class Game:
                         bat = p.try_throw()
                         if bat is not None:
                             self.world.batarangs.append(bat)
+                    case pygame.K_DOWN | pygame.K_s:
+                        p.try_slide()
             elif self.state in {GameState.GAME_OVER, GameState.VICTORY} and event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
                 self.new_run()
         return True

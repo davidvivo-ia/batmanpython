@@ -112,3 +112,10 @@ def draw_hud(surf: pygame.Surface, player: Player, stage_name: str) -> None:
 
     # Stage name top
     draw_text(surf, stage_name, 4, 4, PALETTE["yellow"])
+
+    # Combo indicator
+    if player.combo >= 2:
+        ratio = player.combo_timer / 90 if player.combo_timer else 0
+        draw_text(surf, f"COMBO x{player.combo}", NATIVE_W - 80, 4, PALETTE["orange"])
+        pygame.draw.rect(surf, PALETTE["dark"], (NATIVE_W - 80, 14, 60, 3))
+        pygame.draw.rect(surf, PALETTE["orange"], (NATIVE_W - 80, 14, int(60 * ratio), 3))

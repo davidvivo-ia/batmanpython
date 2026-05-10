@@ -17,6 +17,10 @@ import pygame
 from . import audio, sprites
 from .constants import (
     BATARANG_DAMAGE,
+    COMBO_DAMAGE_BONUS,
+    COMBO_SCORE_BONUS,
+    COMBO_WINDOW,
+    DIVEKICK_DAMAGE,
     EnemyKind,
     Facing,
     GRAVITY,
@@ -35,6 +39,9 @@ from .constants import (
     SCORE_BOSS,
     SCORE_ENEMY,
     SCORE_MIDBOSS,
+    SLIDE_DAMAGE,
+    SLIDE_FRAMES,
+    SLIDE_SPEED,
     WALK_SPEED,
 )
 
@@ -86,6 +93,8 @@ class Player:
     walk_anim: float = 0.0
     next_extra_life: int = 20_000
     queued_throw: bool = False
+    combo: int = 0
+    combo_timer: int = 0
 
     W: int = 12
     H: int = 24
@@ -102,17 +111,34 @@ class Player:
         if self.state is PlayerState.KICK:
             ax = self.x + self.facing * 8
             return Hitbox(ax - 6, self.y + 12, 18, 10)
+        if self.state is PlayerState.SLIDE:
+            ax = self.x + self.facing * 6
+            return Hitbox(ax - 8, self.y + 14, 22, 10)
+        if self.state is PlayerState.DIVEKICK:
+            return Hitbox(self.x - 6, self.y + 14, 12, 10)
         return None
 
     @property
     def attack_damage(self) -> int:
         match self.state:
             case PlayerState.PUNCH:
-                return PUNCH_DAMAGE
+                base = PUNCH_DAMAGE
             case PlayerState.KICK:
-                return KICK_DAMAGE
+                base = KICK_DAMAGE
+            case PlayerState.SLIDE:
+                base = SLIDE_DAMAGE
+            case PlayerState.DIVEKICK:
+                base = DIVEKICK_DAMAGE
             case _:
                 return 0
+        return int(base * (1 + self.combo * COMBO_DAMAGE_BONUS))
+
+    def register_combo_hit(self) -> None:
+        self.combo += 1
+        self.combo_timer = COMBO_WINDOW
+
+    def combo_score_bonus(self, base: int) -> int:
+        return int(base * (1 + self.combo * COMBO_SCORE_BONUS))
 
     # ------------------------------------------------------------------
     def update(self, keys: pygame.key.ScancodeWrapper, level: Level) -> None:
@@ -121,21 +147,34 @@ class Player:
             self.y += self.vy
             return
 
+        # Combo timer decay
+        if self.combo_timer > 0:
+            self.combo_timer -= 1
+            if self.combo_timer == 0:
+                self.combo = 0
+
         attacking = self.state in {PlayerState.PUNCH, PlayerState.KICK, PlayerState.THROW}
-        # Horizontal input
+        sliding = self.state is PlayerState.SLIDE
+        dive = self.state is PlayerState.DIVEKICK
+
+        # Horizontal input (no input during ground attacks; slide moves on its own)
         ax = 0.0
-        if not attacking or not self.on_ground:
+        if sliding:
+            self.vx = SLIDE_SPEED * self.facing
+        elif dive:
+            self.vx = 0  # straight down
+        elif not attacking or not self.on_ground:
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
                 ax -= 1
                 self.facing = Facing.LEFT
             if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
                 ax += 1
                 self.facing = Facing.RIGHT
-        speed = RUN_SPEED if (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]) else WALK_SPEED
-        self.vx = ax * speed
+            speed = RUN_SPEED if (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]) else WALK_SPEED
+            self.vx = ax * speed
 
-        # Gravity
-        self.vy += GRAVITY
+        # Gravity (extra during dive-kick for snappy fall)
+        self.vy += GRAVITY * (3.0 if dive else 1.0)
         self.y += self.vy
         self.x += self.vx
 
@@ -144,9 +183,11 @@ class Player:
             self.y = GROUND_Y - self.H
             self.vy = 0
             if not self.on_ground:
-                # landed
                 if self.state is PlayerState.JUMP:
                     self.state = PlayerState.IDLE
+                elif self.state is PlayerState.DIVEKICK:
+                    self.state = PlayerState.IDLE
+                    self.state_timer = 0
             self.on_ground = True
         else:
             self.on_ground = False
@@ -159,6 +200,7 @@ class Player:
             self.state_timer -= 1
             if self.state_timer == 0 and self.state in {
                 PlayerState.PUNCH, PlayerState.KICK, PlayerState.THROW, PlayerState.HURT,
+                PlayerState.SLIDE,
             }:
                 self.state = PlayerState.IDLE
         if self.iframes > 0:
@@ -192,6 +234,21 @@ class Player:
         if self.state in {PlayerState.IDLE, PlayerState.WALK} and self.on_ground:
             self.state = PlayerState.KICK
             self.state_timer = KICK_FRAMES
+            audio.kick().play()
+        elif not self.on_ground and self.state not in {
+            PlayerState.HURT, PlayerState.DEAD, PlayerState.DIVEKICK,
+        }:
+            # Air kick → dive-kick
+            self.state = PlayerState.DIVEKICK
+            self.state_timer = 60
+            self.vy = max(self.vy, 2.0)
+            audio.kick().play()
+
+    def try_slide(self) -> None:
+        if self.on_ground and self.state in {PlayerState.IDLE, PlayerState.WALK}:
+            self.state = PlayerState.SLIDE
+            self.state_timer = SLIDE_FRAMES
+            self.iframes = max(self.iframes, 8)  # brief invuln through projectiles
             audio.kick().play()
 
     def try_throw(self) -> Batarang | None:
@@ -268,6 +325,10 @@ class Player:
                 return "batman_throw"
             case PlayerState.HURT | PlayerState.DEAD:
                 return "batman_hurt"
+            case PlayerState.SLIDE:
+                return "batman_slide"
+            case PlayerState.DIVEKICK:
+                return "batman_divekick"
 
 
 # ----------------------------------------------------------------------
