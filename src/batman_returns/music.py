@@ -119,6 +119,10 @@ def _track(stage_idx: int) -> pygame.mixer.Sound:
     mix = np.clip(mix, -1, 1)
     samples = (mix * 32767 * 0.5).astype(np.int16)
     stereo = np.column_stack((samples, samples))
+    if not pygame.mixer.get_init():
+        # No audio device — return a stand-in so play_stage() can no-op.
+        from .audio import _SilentSound
+        return _SilentSound()  # type: ignore[return-value]
     return pygame.sndarray.make_sound(np.ascontiguousarray(stereo))
 
 

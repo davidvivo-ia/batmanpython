@@ -104,14 +104,27 @@ feature tests (HUD progression, tutorial activation, charged-batarang piercing, 
 AOE, difficulty scaling, skater motion, Penguin shield window, enemy death animation,
 settings reset, screenshot creation).
 
-## Run it
+## Quick start (one click)
+
+| OS                 | Just run...                                         |
+|--------------------|-----------------------------------------------------|
+| **Windows**        | Double-click `run.bat`                              |
+| **macOS / Linux**  | `./run.sh`  (or `bash run.sh`)                      |
+| **Anywhere**       | `python play.py` (will offer to install missing deps) |
+
+The script auto-creates a `.venv/` virtualenv, installs `pygame-ce` + `numpy`
+the first time, then launches the game. Subsequent runs go straight in.
+
+## Manual install (if you prefer)
 
 ```bash
 python -m pip install -e .
-python -m batman_returns       # or just:  batman-returns
+python -m batman_returns
 ```
 
-Requires Python ≥ 3.11 (3.12 / 3.13 recommended).
+Requires Python ≥ 3.11 (3.12 / 3.13 recommended). The game runs silent if no
+audio device is available (headless servers, sandboxes), so it won't crash
+on systems without ALSA.
 
 ## Controls
 

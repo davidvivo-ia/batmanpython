@@ -15,7 +15,21 @@ import pygame
 SAMPLE_RATE: Final = 44100
 
 
-def _to_sound(wave: np.ndarray, volume: float = 0.4) -> pygame.mixer.Sound:
+class _SilentSound:
+    """No-op stand-in used when the mixer isn't initialised."""
+    def play(self, *_: object, **__: object) -> None:
+        pass
+
+    def set_volume(self, *_: object) -> None:
+        pass
+
+    def get_length(self) -> float:
+        return 0.0
+
+
+def _to_sound(wave: np.ndarray, volume: float = 0.4):
+    if not pygame.mixer.get_init():
+        return _SilentSound()
     wave = np.clip(wave * volume, -1.0, 1.0)
     samples = (wave * 32767).astype(np.int16)
     stereo = np.column_stack((samples, samples))
@@ -166,9 +180,17 @@ _sfx_volume = 1.0
 
 
 def init() -> None:
-    """Init mixer (must be called before pygame.display.set_mode for safety)."""
-    pygame.mixer.pre_init(SAMPLE_RATE, -16, 2, 512)
-    pygame.mixer.init()
+    """Init mixer (must be called before pygame.display.set_mode for safety).
+
+    Tolerates systems without an audio device (no ALSA, headless server, etc.):
+    in that case the mixer simply isn't initialised and every play() call
+    becomes a no-op via pygame.mixer.get_init() guards in the rest of the code.
+    """
+    try:
+        pygame.mixer.pre_init(SAMPLE_RATE, -16, 2, 512)
+        pygame.mixer.init()
+    except pygame.error as exc:
+        print(f"[audio] mixer not available ({exc}); running silent.")
 
 
 def set_sfx_volume(v: float) -> None:
