@@ -128,6 +128,10 @@ class EnemyKind(StrEnum):
     FIREBREATHER = auto()   # FIRETRUC.68K + MINIFIRE.68K
     KNIFER = auto()         # disc/knife thrower
     SKATER = auto()         # Ice Plaza fast slider
+    CYCLE = auto()          # LEVEL_1/CYCLE.68K — motorcycle clown
+    TANK = auto()           # LEVEL_2/TANK.68K — slow heavy w/ shells
+    CANNON = auto()         # LEVEL_2/CANNON.68K — stationary turret
+    WKLITE = auto()         # LEVEL_3/WKLITE.68K — heavy ramming clown
     MIDBOSS_JOKER = auto()  # stage 1 midboss
     MIDBOSS_CATWOMAN = auto()  # stage 2 midboss
     BOSS_PENGUIN = auto()   # VILLAN.68K final boss

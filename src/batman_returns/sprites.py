@@ -558,6 +558,107 @@ CATWOMAN_MIDBOSS = [
     "..KKK..KKK......",
 ]
 
+# Motorcycle clown (24x16) - LEVEL_1/CYCLE.68K
+CYCLE_CLOWN = [
+    "....RRRR................",
+    "...RRWWRR...............",
+    "..RRWWWWRR..............",
+    "..WSKSSKSW..............",
+    "...SSSSSS...............",
+    "...WMMMMW...............",
+    "..WMMMMMMW..............",
+    ".WMMMMMMMW..............",
+    "WMMMMMMMMMW.............",
+    "MMMMMMMMMMM.............",
+    ".KKKK.KKKK..............",
+    "KK.KK.KK.KK.............",
+    "K..KK.KK..K.............",
+    "KK.KKLKK.KK.............",
+    ".KKKLLLKKK..............",
+    "..KKKKKKK...............",
+]
+
+# Tank (32x24) - LEVEL_2/TANK.68K
+TANK = [
+    "................................",
+    ".......GGGGGGGGGGGGGG...........",
+    "......GLLLLLLLLLLLLLG...........",
+    "......GLGGGLLLGGGLLLG...........",
+    "......GGGGGGGGGGGGGGG...........",
+    ".....GGGGKKKKKKKGGGGGG..........",
+    ".....GGGKKKKKKKKKGGGGG..........",
+    "......GGGGKKKKKGGGGGG...........",
+    "GGGGGGGGGGGGGGGGGGGGGG..........",
+    "GLLLLLLLLLLLLLLLLLLLLLG.........",
+    "GGGGGGGGGGGGGGGGGGGGGGG.........",
+    "GGGGGGGGGGGGGGGGGGGGGGG.........",
+    "GLLLLLLLLLLLLLLLLLLLLLG.........",
+    "GGGGGGGGGGGGGGGGGGGGGGG.........",
+    "GLLGGLLGGLLGGLLGGLLGGLLG........",
+    ".KKKKKKKKKKKKKKKKKKKKKK.........",
+    ".KKKKKKKKKKKKKKKKKKKKKK.........",
+    ".KKKKKKKKKKKKKKKKKKKKKK.........",
+    ".KKKKKKKKKKKKKKKKKKKKKK.........",
+    "KKKK..KKKK..KKKK..KKKKK.........",
+    "KKKK..KKKK..KKKK..KKKKK.........",
+    "KKKK..KKKK..KKKK..KKKKK.........",
+    "KKKK..KKKK..KKKK..KKKKK.........",
+    "................................",
+]
+
+# Cannon turret (16x16) - LEVEL_2/CANNON.68K
+CANNON_TURRET = [
+    "................",
+    "................",
+    "................",
+    ".....KKKKKK.....",
+    "....KKKKKKKK....",
+    "....KKKKKKKK....",
+    ".KKKKKKKKKKKKKKK",
+    "KKLLLLLLLLLLLLLK",
+    "KKLLLLLLLLLLLLLK",
+    "KKKKKKKKKKKKKKKK",
+    ".KKKKGGGGGGKKKK.",
+    ".KKGGGGGGGGGGKK.",
+    "KKGGGGGGGGGGGGKK",
+    "KGGGGGGGGGGGGGGK",
+    "GGGGGGGGGGGGGGGG",
+    "GGGGGGGGGGGGGGGG",
+]
+
+# Weight-light (24x28) - LEVEL_3/WKLITE.68K — burly ramming clown
+WKLITE_CLOWN = [
+    "......RRRRRRRR..........",
+    ".....RRWWWWWWRR.........",
+    "....RRRWWWWWWRRR........",
+    "....RRSSSSSSSSRR........",
+    "....SSSKSSSSKSSS........",
+    "....SSSSSSSSSSSS........",
+    "....SSWMMMMMMSSS........",
+    ".....SWWWWWWWWS.........",
+    "....MMMMMMMMMMM.........",
+    "...MMMMMMMMMMMMM........",
+    "..MMMMMMMMMMMMMM........",
+    "..MMMMYMMMMMYMMM........",
+    ".MMMMMMMMMMMMMMM........",
+    ".MMMMMMMMMMMMMMM........",
+    ".MMMMMMMMMMMMMMMM.......",
+    "MMMMMMMMMMMMMMMMMM......",
+    "MMMMMMMMMMMMMMMMMM......",
+    "MMMMMMMMMMMMMMMMMM......",
+    ".MMMMMMMMMMMMMMMM.......",
+    ".MMMM......MMMMM........",
+    "..MMM......MMMM.........",
+    "..LLL......LLLL.........",
+    "..LLL......LLLL.........",
+    ".LLLL......LLLLL........",
+    "LLLLL......LLLLLL.......",
+    "LLLLL......LLLLLL.......",
+    "LLLLL......LLLLLL.......",
+    "LLLLL......LLLLLL.......",
+]
+
+
 # Penguin boss is bigger (24x32)
 SKATER_CLOWN = [
     "....RRRR........",
@@ -893,6 +994,10 @@ SPRITE_REGISTRY: dict[str, list[str]] = {
     "firebreather": FIREBREATHER,
     "knifer": KNIFER,
     "skater": SKATER_CLOWN,
+    "cycle": CYCLE_CLOWN,
+    "tank": TANK,
+    "cannon": CANNON_TURRET,
+    "wklite": WKLITE_CLOWN,
     "penguin": PENGUIN_BOSS,
     "joker": JOKER_MIDBOSS,
     "catwoman": CATWOMAN_MIDBOSS,

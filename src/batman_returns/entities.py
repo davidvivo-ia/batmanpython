@@ -514,6 +514,26 @@ class Enemy:
                 return s(cls(kind, x, y, hp=35, max_hp=35, contact_damage=8))
             case EnemyKind.SKATER:
                 return s(cls(kind, x, y, hp=30, max_hp=30, contact_damage=12))
+            case EnemyKind.CYCLE:
+                return s(cls(
+                    kind, x, GROUND_Y - 16, hp=25, max_hp=25,
+                    W=24, H=16, contact_damage=18, score_value=400,
+                ))
+            case EnemyKind.TANK:
+                return s(cls(
+                    kind, x, GROUND_Y - 24, hp=220, max_hp=220,
+                    W=32, H=24, contact_damage=22, score_value=2000, boss=True,
+                ))
+            case EnemyKind.CANNON:
+                return s(cls(
+                    kind, x, GROUND_Y - 16, hp=30, max_hp=30,
+                    W=16, H=16, contact_damage=8, score_value=400,
+                ))
+            case EnemyKind.WKLITE:
+                return s(cls(
+                    kind, x, GROUND_Y - 28, hp=90, max_hp=90,
+                    W=24, H=28, contact_damage=18, score_value=800,
+                ))
             case EnemyKind.MIDBOSS_JOKER:
                 return s(cls(
                     kind, x, GROUND_Y - 28, hp=180, max_hp=180,
@@ -555,8 +575,17 @@ class Enemy:
                 self.alive = False
             return []
         # Patrol → chase: non-bosses gate aggressive behaviour on alert.
-        if not self.boss and not self.alert:
-            if abs(player.x - self.x) < 80:
+        # CYCLE / TANK / CANNON / SKATER are always alert (no patrol).
+        always_alert = self.kind in {
+            EnemyKind.CYCLE, EnemyKind.TANK, EnemyKind.CANNON, EnemyKind.SKATER,
+        }
+        if not self.boss and not self.alert and not always_alert:
+            alert_radius = {
+                EnemyKind.KNIFER: 120,
+                EnemyKind.FIREBREATHER: 100,
+                EnemyKind.WKLITE: 90,
+            }.get(self.kind, 80)
+            if abs(player.x - self.x) < alert_radius:
                 self.alert = True
             else:
                 # Idle pacing around spawn point at half speed
@@ -575,6 +604,14 @@ class Enemy:
                 proj = self._update_knifer(player)
             case EnemyKind.SKATER:
                 proj = self._update_skater(player)
+            case EnemyKind.CYCLE:
+                proj = self._update_cycle(player)
+            case EnemyKind.TANK:
+                proj = self._update_tank(player)
+            case EnemyKind.CANNON:
+                proj = self._update_cannon(player)
+            case EnemyKind.WKLITE:
+                proj = self._update_wklite(player)
             case EnemyKind.MIDBOSS_JOKER:
                 return self._update_joker_multi(player, level)
             case EnemyKind.MIDBOSS_CATWOMAN:
@@ -674,6 +711,54 @@ class Enemy:
         self.x += self.vx
         self.facing = Facing.LEFT if self.vx < 0 else Facing.RIGHT
         self.walk_anim += abs(self.vx) * 0.2
+        return None
+
+    def _update_cycle(self, player: Player) -> None:
+        # Always alert (no patrol). Charges horizontally at high speed.
+        speed = 4.5
+        if self.vx == 0:
+            self.vx = -speed if player.x < self.x else speed
+        self.x += self.vx
+        self.facing = Facing.LEFT if self.vx < 0 else Facing.RIGHT
+        self.walk_anim += abs(self.vx) * 0.3
+        return None
+
+    def _update_tank(self, player: Player) -> EnemyProjectile | None:
+        # Crawls slowly; lobs a parabolic shell.
+        dx = player.x - self.x
+        if abs(dx) > 80:
+            self._walk_toward(player, 0.4)
+        else:
+            self.vx = 0
+            self.facing = Facing.LEFT if dx < 0 else Facing.RIGHT
+            if self.attack_cooldown <= 0:
+                self.attack_cooldown = 90
+                return EnemyProjectile(
+                    x=self.x, y=self.y - 4,
+                    vx=2.4 * self.facing, vy=-3.0,
+                    sprite="knife_proj", damage=20, life=120,
+                )
+        return None
+
+    def _update_cannon(self, player: Player) -> EnemyProjectile | None:
+        # Stationary turret. Fires at fixed cadence regardless of distance.
+        self.facing = Facing.LEFT if player.x < self.x else Facing.RIGHT
+        if self.attack_cooldown <= 0 and abs(player.x - self.x) < 200:
+            self.attack_cooldown = 80
+            return EnemyProjectile(
+                x=self.x, y=self.y - 4,
+                vx=3.0 * self.facing, vy=-1.5,
+                sprite="knife_proj", damage=14, life=100,
+            )
+        return None
+
+    def _update_wklite(self, player: Player) -> None:
+        # Heavy walker — slow but deals big knockback.
+        dx = player.x - self.x
+        if abs(dx) > 24:
+            self._walk_toward(player, 0.6)
+        else:
+            self.vx = 0
         return None
 
     def _update_joker(self, player: Player, level: Level) -> EnemyProjectile | None:
@@ -925,6 +1010,14 @@ class Enemy:
                 return "knifer"
             case EnemyKind.SKATER:
                 return "skater"
+            case EnemyKind.CYCLE:
+                return "cycle"
+            case EnemyKind.TANK:
+                return "tank"
+            case EnemyKind.CANNON:
+                return "cannon"
+            case EnemyKind.WKLITE:
+                return "wklite"
             case EnemyKind.MIDBOSS_JOKER:
                 return "joker"
             case EnemyKind.MIDBOSS_CATWOMAN:

@@ -87,13 +87,29 @@ def _spawn_for_stage(world: World) -> None:
         if tx > stage.length_tiles - 16 and stage.boss:
             break  # save boss arena
         if world.rng.random() < stage.enemy_density:
-            # Stage-specific roster: skaters appear only on Ice Plaza.
+            # Stage-specific roster:
+            # - Streets/Rooftops/Docks get motorcycles
+            # - Sewers/Asylum get heavy WKLITE clowns + cannons
+            # - Ice gets skaters
+            stage_name = stage.name
             if stage.snow:
                 population = [
                     EnemyKind.BASHER, EnemyKind.JACKBOX, EnemyKind.FIREBREATHER,
                     EnemyKind.KNIFER, EnemyKind.SKATER,
                 ]
                 weights = [4, 1, 2, 2, 3]
+            elif "ROOFTOPS" in stage_name or "STREETS" in stage_name or "DOCKS" in stage_name:
+                population = [
+                    EnemyKind.BASHER, EnemyKind.JACKBOX, EnemyKind.FIREBREATHER,
+                    EnemyKind.KNIFER, EnemyKind.CYCLE, EnemyKind.CANNON,
+                ]
+                weights = [4, 1, 2, 2, 3, 1]
+            elif "SEWERS" in stage_name or "ASYLUM" in stage_name:
+                population = [
+                    EnemyKind.BASHER, EnemyKind.JACKBOX, EnemyKind.FIREBREATHER,
+                    EnemyKind.KNIFER, EnemyKind.WKLITE, EnemyKind.CANNON,
+                ]
+                weights = [3, 2, 2, 2, 2, 1]
             else:
                 population = [
                     EnemyKind.BASHER, EnemyKind.JACKBOX, EnemyKind.FIREBREATHER,
@@ -102,7 +118,9 @@ def _spawn_for_stage(world: World) -> None:
                 weights = [5, 2, 2, 3]
             kind = world.rng.choices(population=population, weights=weights)[0]
             wx = tx * TILE_SIZE + 8
-            world.enemies.append(Enemy.spawn(kind, wx, GROUND_Y - 24, hp_scale, dmg_scale))
+            # CYCLE spawns at a y-position that lets it streak across.
+            spawn_y = GROUND_Y - 16 if kind == EnemyKind.CYCLE else GROUND_Y - 24
+            world.enemies.append(Enemy.spawn(kind, wx, spawn_y, hp_scale, dmg_scale))
         # Pickup chance
         if world.rng.random() < 0.04:
             wx = tx * TILE_SIZE + 8
