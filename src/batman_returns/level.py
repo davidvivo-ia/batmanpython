@@ -41,35 +41,85 @@ class Stage:
     midboss_at_tile: int = 0
     platform_sprite: str = "tile_brick"  # which 16x16 to use for platforms
     foreground: str = ""          # "lamp" | "icicle" | "pillar" | ""
+    hazard_kind: str = ""         # "" | "pit" | "water"
+    hazard_density: float = 0.0   # 0..1 — fraction of tile-columns that are hazards
 
 
 STAGES: Final = (
     Stage(
         name="GOTHAM STREETS",
-        length_tiles=160,
+        length_tiles=140,
         ground_tile="tile_ground",
         sky_top=(20, 8, 40),
         sky_bot=(80, 30, 100),
         enemy_density=0.10,
         midboss_kind="midboss_joker",
-        midboss_at_tile=120,
+        midboss_at_tile=110,
         rain=True,
         lightning=True,
         platform_sprite="tile_brick",
         foreground="lamp",
     ),
     Stage(
+        name="GOTHAM ROOFTOPS",
+        length_tiles=140,
+        ground_tile="tile_rooftop",
+        sky_top=(15, 5, 30),
+        sky_bot=(60, 20, 80),
+        enemy_density=0.09,
+        rain=True,
+        lightning=True,
+        platform_sprite="tile_brick",
+        foreground="lamp",
+        hazard_kind="pit",
+        hazard_density=0.30,
+    ),
+    Stage(
+        name="THE SEWERS",
+        length_tiles=130,
+        ground_tile="tile_sewer",
+        sky_top=(8, 18, 12),
+        sky_bot=(20, 50, 30),
+        enemy_density=0.14,
+        platform_sprite="tile_brick",
+        foreground="pillar",
+        hazard_kind="water",
+        hazard_density=0.20,
+    ),
+    Stage(
         name="ICE PLAZA",
-        length_tiles=180,
+        length_tiles=160,
         ground_tile="tile_snow",
         sky_top=(30, 30, 90),
         sky_bot=(140, 160, 200),
         snow=True,
         enemy_density=0.13,
         midboss_kind="midboss_catwoman",
-        midboss_at_tile=140,
+        midboss_at_tile=130,
         platform_sprite="tile_snow",
         foreground="icicle",
+    ),
+    Stage(
+        name="HARBOR DOCKS",
+        length_tiles=150,
+        ground_tile="tile_dock",
+        sky_top=(10, 14, 50),
+        sky_bot=(50, 80, 130),
+        enemy_density=0.12,
+        platform_sprite="tile_brick",
+        foreground="lamp",
+        hazard_kind="water",
+        hazard_density=0.22,
+    ),
+    Stage(
+        name="ARKHAM ASYLUM",
+        length_tiles=140,
+        ground_tile="tile_brick",
+        sky_top=(30, 10, 30),
+        sky_bot=(80, 40, 60),
+        enemy_density=0.18,
+        platform_sprite="tile_brick",
+        foreground="pillar",
     ),
     Stage(
         name="PENGUIN'S LAIR",
@@ -107,6 +157,7 @@ class Level:
     raindrops: list[list[float]] = field(default_factory=list)   # [x, y, vy]
     skyline: list[tuple[int, int, int]] = field(default_factory=list)  # x, h, palette_idx
     platforms: list[Platform] = field(default_factory=list)
+    hazards: list[tuple[int, int]] = field(default_factory=list)  # (tile_x_start, tile_x_end) inclusive
     lightning_flash: int = 0  # frames remaining
     lightning_cooldown: int = 240
     rng: random.Random = field(default_factory=lambda: random.Random(0xBA7))
@@ -151,6 +202,25 @@ class Level:
                 tx += w_tiles + rng.randint(2, 5)
             else:
                 tx += rng.randint(3, 6)
+        # Procedural hazards (gaps in the floor). Skip the first few and last
+        # few tiles so the player has safe spawn / boss arena space.
+        if self.stage.hazard_kind and self.stage.hazard_density > 0:
+            tx = 16
+            while tx < self.stage.length_tiles - 20:
+                if rng.random() < self.stage.hazard_density:
+                    width = rng.randint(2, 4)
+                    end = min(tx + width - 1, self.stage.length_tiles - 22)
+                    self.hazards.append((tx, end))
+                    tx = end + rng.randint(4, 8)
+                    # Drop a rescue platform above wide hazards so the player
+                    # can attempt a recovery jump.
+                    if width >= 3:
+                        rescue_x = (tx - width // 2) * TILE_SIZE
+                        rescue_w = 2 * TILE_SIZE
+                        rescue_y = GROUND_Y - 36
+                        self.platforms.append(Platform(rescue_x, rescue_y, rescue_w, 8))
+                else:
+                    tx += rng.randint(3, 6)
 
     # ------------------------------------------------------------------
     def update(self, target_cam_x: float, dt: float) -> None:
@@ -272,10 +342,23 @@ class Level:
 
     def _draw_ground(self, surf: pygame.Surface) -> None:
         tile = sprites.get(self.stage.ground_tile)
+        hazard_tile = (
+            sprites.get("tile_water") if self.stage.hazard_kind == "water"
+            else sprites.get("tile_pit") if self.stage.hazard_kind == "pit"
+            else None
+        )
         ground_y = NATIVE_H - 32
         offset = int(self.cam_x) % TILE_SIZE
+        cam_t0 = int(self.cam_x) // TILE_SIZE
         for col in range(NATIVE_W // TILE_SIZE + 2):
+            world_tile = cam_t0 + col
             sx = col * TILE_SIZE - offset
+            if self.is_hazard_at(world_tile * TILE_SIZE + 8):
+                if hazard_tile is not None:
+                    for row in range(2):
+                        surf.blit(hazard_tile, (sx, ground_y + row * TILE_SIZE))
+                # Else: leave a void (true bottomless pit visual).
+                continue
             for row in range(2):
                 surf.blit(tile, (sx, ground_y + row * TILE_SIZE))
         # Real platforms
@@ -296,6 +379,11 @@ class Level:
     # ------------------------------------------------------------------
     def world_to_screen(self, x: float) -> int:
         return int(x - self.cam_x)
+
+    def is_hazard_at(self, world_x: float) -> bool:
+        """True if world_x falls inside a hazard zone (pit or water)."""
+        tile = int(world_x // TILE_SIZE)
+        return any(start <= tile <= end for start, end in self.hazards)
 
     def platform_top_below(
         self,

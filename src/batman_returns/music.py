@@ -90,10 +90,20 @@ LAIR_BASS = [
 
 @cache
 def _track(stage_idx: int) -> pygame.mixer.Sound:
-    if stage_idx == 0:
+    # Cycle through the three composed loops by mood:
+    #   Gotham/Streets/Rooftops/Sewers/Docks → dark walking-bass
+    #   ICE PLAZA → suspended fourths
+    #   ARKHAM/LAIR → driving lead
+    stage_to_mood = {
+        0: "gotham", 1: "gotham", 2: "gotham",
+        3: "ice",
+        4: "gotham", 5: "lair", 6: "lair",
+    }
+    mood = stage_to_mood.get(stage_idx, "gotham")
+    if mood == "gotham":
         lead = _render_track(GOTHAM_LEAD, _square)
         bass = _render_track(GOTHAM_BASS, _triangle)
-    elif stage_idx == 1:
+    elif mood == "ice":
         lead = _render_track(ICE_LEAD, _square)
         bass = _render_track(ICE_BASS, _triangle)
     else:

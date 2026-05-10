@@ -705,6 +705,102 @@ GOAL_FLAG = [
 # Tile / scenery (16x16)
 # ----------------------------------------------------------------------
 
+# Stage-specific ground variants
+TILE_ROOFTOP = [
+    "BBBBBBBBBBBBBBBB",
+    "BLLLLLLBBBLLLLBB",
+    "BBBBBBBBBBBBBBBB",
+    "BBBLLBBBBBBBLLBB",
+    "BBBBBBBBBBBBBBBB",
+    "DDDDDDDDDDDDDDDD",
+    "DKKDDDKKDDDKKKDD",
+    "DDDDDDDDDDDDDDDD",
+    "DDKDDDDKDDDDDKDD",
+    "DDDDDDDDDDDDDDDD",
+    "DDKKKDDDKKKDDDKK",
+    "DDDDDDDDDDDDDDDD",
+    "KKKKKKKKKKKKKKKK",
+    "KKKKKKKKKKKKKKKK",
+    "KKKKKKKKKKKKKKKK",
+    "KKKKKKKKKKKKKKKK",
+]
+
+TILE_SEWER = [
+    "EEEEEEEEEEEEEEEE",
+    "EEEEKKKEEEEEEEEE",
+    "EEEKEEEKEEEEEEEE",
+    "EEEEEKKEEEEEEEEE",
+    "EEEEEEEEEEKEEEEE",
+    "EEEEEEEEEEKKEEEE",
+    "EEEEEEEEEEKEEEEE",
+    "EEEEEEEEEEEEEEEE",
+    "DEEEEEEEEEEEEEED",
+    "DDEEEEEEEEEEEEDD",
+    "DDDDDDDDDDDDDDDD",
+    "KDDDDDDDDDDDDDDD",
+    "KKDDDDDDDDDDDDDD",
+    "KKKDDDDDDDDDDDDD",
+    "KKKKDDDDDDDDDDDD",
+    "KKKKKKKKKKKKKKKK",
+]
+
+TILE_DOCK = [
+    "DDDDDDDDDDDDDDDD",
+    "OOOOOODDOOOOOOOO",
+    "OYYOOOODOOOYYOOO",
+    "OYYOOOODOOOYYOOO",
+    "OOOOOOODOOOOOOOO",
+    "OOOOOOODOOOOOOOO",
+    "DDDDDDDDDDDDDDDD",
+    "OOODOOOOODOOOOOO",
+    "OOODOOOOODOOOOOO",
+    "DOOOOOOOOOOOOOOD",
+    "DDDDDDDDDDDDDDDD",
+    "GGGGGGGGGGGGGGGG",
+    "GGGGGGGGGGGGGGGG",
+    "DDDDDDDDDDDDDDDD",
+    "GGGGGGGGGGGGGGGG",
+    "GGGGGGGGGGGGGGGG",
+]
+
+TILE_HAZARD_PIT = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "..K....K....K...",
+    "...KK....KK.....",
+    "....KK..KKK.....",
+    "..KKKKKKKK.K....",
+    ".KKKKKKKKKKKK...",
+    "KKKKKKKKKKKKKK..",
+    "KKKKKKKKKKKKKKKK",
+    "KKKKKKKKKKKKKKKK",
+]
+
+TILE_HAZARD_WATER = [
+    "................",
+    "................",
+    "................",
+    "PPPPPPPPPPPPPPPP",
+    "PNPPPPPNPPPPPPPP",
+    "PPPNPPPPPPPNPPPP",
+    "NPPPPPNPPPPPPPNP",
+    "PPPNPPPPPNPPPPPP",
+    "NPPPPPPPPPPPNPPP",
+    "PPPPPNPPPPPPPPPN",
+    "PPPNPPPPPNPPPNPP",
+    "NPPPPPNPPPPPPPPP",
+    "PPPNPPPPPPPNPPPP",
+    "NPPPPPPNPPPPPPPN",
+    "PPPNPPPPPPPNPPPP",
+    "NPPPPPNPPPPPPPNP",
+]
+
 TILE_GROUND = [
     "GGGGGGGGGGGGGGGG",
     "GLLGGGLLGGGLLGGG",
@@ -806,5 +902,10 @@ SPRITE_REGISTRY: dict[str, list[str]] = {
     "tile_ground": TILE_GROUND,
     "tile_brick": TILE_BRICK,
     "tile_snow": TILE_SNOW,
+    "tile_rooftop": TILE_ROOFTOP,
+    "tile_sewer": TILE_SEWER,
+    "tile_dock": TILE_DOCK,
+    "tile_pit": TILE_HAZARD_PIT,
+    "tile_water": TILE_HAZARD_WATER,
     "goal_flag": GOAL_FLAG,
 }

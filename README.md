@@ -129,11 +129,19 @@ Requires Python ≥ 3.11 (3.12 / 3.13 recommended).
 | H (on title)       | High scores           |
 | Gamepad            | A=jump, X=punch, Y=kick, B=batarang, LB/RB=slide, Start=pause |
 
-## Stages
+## Stages (7 in total)
 
 1. **Gotham Streets** — clowns, knife-throwers, **rain + lightning + thunder**, midboss **Joker** (3-card fan)
-2. **Ice Plaza** — fire-breather clowns, jack-in-the-boxes, snow particles, midboss **Catwoman** (lunge + jump-over)
-3. **Penguin's Lair** — final boss the **Penguin** in 3 phases (single shot → double + dive → triple spread)
+2. **Gotham Rooftops** — bottomless pits with rescue platforms; rain & lightning; lamp-post foreground
+3. **The Sewers** — green slime tiles, **water hazard** that kills on contact, pillar foreground
+4. **Ice Plaza** — fire-breather clowns, jack-in-the-boxes, **skater clowns**, snow particles, midboss **Catwoman** (lunge + jump-over)
+5. **Harbor Docks** — wooden plank ground with water gaps between piers; lamp foreground
+6. **Arkham Asylum** — dense enemy waves, no hazards, no boss — pure combat playground
+7. **Penguin's Lair** — final boss the **Penguin** in 3 phases (single shot → double + dive → triple spread, with brief umbrella shield window)
+
+Hazards (pits and water) are instant-kill if you fall in: the player respawns
+at their last safe ground position with one fewer life. Each wide hazard gets
+a rescue platform above it so the gap stays jumpable.
 
 Score the original economy: small object 100, pickup 200, enemy 500, mid-boss
 2 000, final boss 5 000. Extra life every 20 000 points.

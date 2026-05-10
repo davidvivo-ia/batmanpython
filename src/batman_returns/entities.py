@@ -96,6 +96,7 @@ class Player:
     combo_timer: int = 0
     last_throw_flash: int = 0  # frames remaining of HUD batarang flash
     charge_frames: int = 0     # how long C is held (for charged shot)
+    _last_safe_x: float = 32.0  # last on-ground non-hazard x for pit respawn
 
     W: int = 12
     H: int = 24
@@ -197,9 +198,21 @@ class Player:
         if plat_top is not None and self.vy >= 0:
             landed_y = plat_top - self.H
 
-        # Ground collision
-        if self.y >= GROUND_Y - self.H:
+        # Ground collision — but skip it if this column is a hazard pit.
+        in_hazard = level.is_hazard_at(self.x)
+        if not in_hazard and self.y >= GROUND_Y - self.H:
             landed_y = GROUND_Y - self.H
+
+        # Pit-fall: dropped past the screen — instant lethal damage.
+        if self.y > GROUND_Y + 80 and self.state is not PlayerState.DEAD:
+            # Bypass i-frames so a pit reliably kills.
+            self.iframes = 0
+            self.take_damage(self.hp + 1)
+            # If the player still has lives, respawn at last safe ground tile.
+            if self.state is not PlayerState.DEAD:
+                self.x = self._last_safe_x
+                self.y = GROUND_Y - self.H
+                self.vy = 0
 
         if landed_y is not None:
             self.y = landed_y
@@ -209,6 +222,10 @@ class Player:
             # Defer DIVEKICK→IDLE for one frame (handled by state_timer below)
             # so attack_hitbox stays valid on the landing-impact frame.
             self.on_ground = True
+            # Record this as a safe respawn anchor (only on real ground, not
+            # platform tops — platforms can be over hazards).
+            if not in_hazard and self.y >= GROUND_Y - self.H - 1:
+                self._last_safe_x = self.x
         else:
             self.on_ground = False
 

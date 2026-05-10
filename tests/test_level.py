@@ -6,11 +6,16 @@ from batman_returns.constants import NATIVE_W, TILE_SIZE
 from batman_returns.level import STAGES, Level
 
 
-def test_three_stages_with_expected_metadata() -> None:
-    assert len(STAGES) == 3
+def test_seven_stages_with_expected_metadata() -> None:
+    assert len(STAGES) == 7
     assert STAGES[0].midboss_kind == "midboss_joker"
-    assert STAGES[1].midboss_kind == "midboss_catwoman"
-    assert STAGES[2].boss is True
+    # Stages 1, 2, 4, 5 are non-boss connecting stages; stage 3 has Catwoman.
+    assert STAGES[3].midboss_kind == "midboss_catwoman"
+    assert STAGES[6].boss is True
+    # Hazard stages
+    assert STAGES[1].hazard_kind == "pit"
+    assert STAGES[2].hazard_kind == "water"
+    assert STAGES[4].hazard_kind == "water"
 
 
 def test_platform_top_below_returns_top_when_falling_through() -> None:

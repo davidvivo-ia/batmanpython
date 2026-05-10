@@ -358,6 +358,10 @@ def _world_objective(world: World) -> str:
             "midboss_joker": "DEFEAT THE JOKER",
             "midboss_catwoman": "DEFEAT CATWOMAN",
         }[stage.midboss_kind]
+    if stage.hazard_kind == "pit":
+        return "WATCH YOUR STEP — REACH THE FLAG >>"
+    if stage.hazard_kind == "water":
+        return "MIND THE WATER — REACH THE FLAG >>"
     return "REACH THE FLAG >>"
 
 
@@ -551,15 +555,15 @@ def _draw_stage_select(surf: pygame.Surface, save: persistence.SaveData, cursor:
     overlay = pygame.Surface((NATIVE_W, NATIVE_H), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 220))
     surf.blit(overlay, (0, 0))
-    draw_text(surf, "STAGE SELECT", NATIVE_W // 2 - 50, 30, PALETTE["yellow"], scale=2)
-    names = ["1. GOTHAM STREETS", "2. ICE PLAZA", "3. PENGUIN'S LAIR"]
-    max_unlocked = (save.highest_cleared_stage + 1) if not save.beat_game else 2
+    draw_text(surf, "STAGE SELECT", NATIVE_W // 2 - 50, 16, PALETTE["yellow"], scale=2)
+    names = [f"{i+1}. {STAGES[i].name}" for i in range(len(STAGES))]
+    max_unlocked = (save.highest_cleared_stage + 1) if not save.beat_game else len(STAGES) - 1
     for i, name in enumerate(names):
         unlocked = i <= max_unlocked
         col = PALETTE["yellow"] if i == cursor else (PALETTE["lightgray"] if unlocked else PALETTE["gray"])
         prefix = "> " if i == cursor else "  "
         suffix = "" if unlocked else "  [LOCKED]"
-        draw_text(surf, prefix + name + suffix, 70, 80 + i * 16, col)
+        draw_text(surf, prefix + name + suffix, 50, 50 + i * 14, col)
     draw_text(surf, "ENTER START  ESC BACK", NATIVE_W // 2 - 60, NATIVE_H - 16, PALETTE["gray"])
 
 
@@ -576,7 +580,11 @@ def _draw_high_scores(surf: pygame.Surface, scores: list[int]) -> None:
 def _stage_objective_line(stage_idx: int) -> str:
     return [
         "OBJECTIVE: DEFEAT JOKER, REACH THE FLAG",
+        "OBJECTIVE: WATCH YOUR STEP — REACH THE FLAG",
+        "OBJECTIVE: AVOID THE WATER — REACH THE FLAG",
         "OBJECTIVE: DEFEAT CATWOMAN, REACH THE FLAG",
+        "OBJECTIVE: CROSS THE DOCKS — REACH THE FLAG",
+        "OBJECTIVE: SURVIVE ARKHAM — REACH THE FLAG",
         "OBJECTIVE: DEFEAT THE PENGUIN",
     ][stage_idx]
 
@@ -644,8 +652,9 @@ class Game:
     tutorial_active: bool = False
 
     def _title_items(self) -> list[str]:
+        last = len(STAGES) - 1
         items = ["NEW GAME"]
-        if self.save.highest_cleared_stage >= 0 and self.save.highest_cleared_stage < 2:
+        if 0 <= self.save.highest_cleared_stage < last:
             items.append("CONTINUE")
         if self.save.beat_game or self.save.highest_cleared_stage >= 0:
             items.append("STAGE SELECT")
@@ -653,12 +662,13 @@ class Game:
         return items
 
     def _title_select(self, item: str) -> None:
+        last = len(STAGES) - 1
         match item:
             case "NEW GAME":
                 self.new_run()
             case "CONTINUE":
                 next_stage = self.save.highest_cleared_stage + 1
-                self.new_run(starting_stage=max(0, min(next_stage, 2)))
+                self.new_run(starting_stage=max(0, min(next_stage, last)))
             case "STAGE SELECT":
                 self.state = GameState.STAGE_SELECT
                 self.stage_select_cursor = 0
@@ -877,11 +887,12 @@ class Game:
             self.state = GameState.TITLE
 
     def _handle_stage_select_key(self, event: pygame.event.Event) -> None:
-        max_unlocked = (self.save.highest_cleared_stage + 1) if not self.save.beat_game else 2
+        last = len(STAGES) - 1
+        max_unlocked = (self.save.highest_cleared_stage + 1) if not self.save.beat_game else last
         if event.key in {pygame.K_UP, pygame.K_w}:
             self.stage_select_cursor = max(0, self.stage_select_cursor - 1)
         elif event.key in {pygame.K_DOWN, pygame.K_s}:
-            self.stage_select_cursor = min(2, self.stage_select_cursor + 1)
+            self.stage_select_cursor = min(last, self.stage_select_cursor + 1)
         elif event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
             if self.stage_select_cursor <= max_unlocked:
                 self.new_run(starting_stage=self.stage_select_cursor)
