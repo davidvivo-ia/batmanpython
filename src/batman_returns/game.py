@@ -30,7 +30,7 @@ from .constants import (
     GameState,
     PlayerState,
 )
-from . import persistence
+from . import music, persistence
 from .effects import FloatingTextSystem, HitFreeze, ParticleSystem, ScreenShake
 from .entities import (
     Batarang,
@@ -296,16 +296,21 @@ def _draw_victory(surf: pygame.Surface, world: World, blink: int) -> None:
         draw_text(surf, "ENTER TO PLAY AGAIN", NATIVE_W // 2 - 60, NATIVE_H // 2 + 30, PALETTE["yellow"])
 
 
-def _draw_pause(surf: pygame.Surface, cursor: int, sfx_vol: float) -> None:
+def _draw_pause(surf: pygame.Surface, cursor: int, sfx_vol: float, music_vol: float) -> None:
     overlay = pygame.Surface((NATIVE_W, NATIVE_H), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 170))
     surf.blit(overlay, (0, 0))
-    draw_text(surf, "PAUSED", NATIVE_W // 2 - 30, NATIVE_H // 2 - 50, PALETTE["yellow"], scale=2)
-    items = ["RESUME", "QUIT TO TITLE", f"SFX VOL {int(sfx_vol * 100):3d}"]
+    draw_text(surf, "PAUSED", NATIVE_W // 2 - 30, NATIVE_H // 2 - 60, PALETTE["yellow"], scale=2)
+    items = [
+        "RESUME",
+        "QUIT TO TITLE",
+        f"SFX VOL {int(sfx_vol * 100):3d}",
+        f"MUSIC VOL {int(music_vol * 100):3d}",
+    ]
     for i, label in enumerate(items):
         col = PALETTE["yellow"] if i == cursor else PALETTE["lightgray"]
         prefix = "> " if i == cursor else "  "
-        draw_text(surf, prefix + label, NATIVE_W // 2 - 60, NATIVE_H // 2 - 10 + i * 14, col)
+        draw_text(surf, prefix + label, NATIVE_W // 2 - 60, NATIVE_H // 2 - 20 + i * 14, col)
 
 
 def _draw_high_scores(surf: pygame.Surface, scores: list[int]) -> None:
@@ -351,6 +356,8 @@ class Game:
         self.state = GameState.LEVEL_INTRO
         self.intro_timer = 90
         self.score_recorded = False
+        music.set_volume(self.save.music_volume)
+        music.play_stage(self.stage_idx)
 
     def _make_world(self, carry: Player | None) -> World:
         level = Level(STAGES[self.stage_idx])
@@ -373,11 +380,13 @@ class Game:
         assert self.world is not None
         if self.stage_idx + 1 >= len(STAGES):
             self.state = GameState.VICTORY
+            music.stop()
             return
         self.stage_idx += 1
         self.world = self._make_world(carry=self.world.player)
         self.state = GameState.LEVEL_INTRO
         self.intro_timer = 90
+        music.play_stage(self.stage_idx)
 
     # ------------------------------------------------------------------
     def handle_event(self, event: pygame.event.Event) -> bool:
@@ -430,18 +439,23 @@ class Game:
                         p.try_slide()
             case GameState.PAUSED:
                 if event.key in {pygame.K_UP, pygame.K_w}:
-                    self.pause_cursor = (self.pause_cursor - 1) % 3
+                    self.pause_cursor = (self.pause_cursor - 1) % 4
                 elif event.key in {pygame.K_DOWN, pygame.K_s}:
-                    self.pause_cursor = (self.pause_cursor + 1) % 3
+                    self.pause_cursor = (self.pause_cursor + 1) % 4
                 elif event.key in {pygame.K_RETURN, pygame.K_KP_ENTER}:
                     if self.pause_cursor == 0:
                         self.state = GameState.PLAYING
                     elif self.pause_cursor == 1:  # quit to title
                         self._record_score()
+                        music.stop()
                         self.state = GameState.TITLE
                     elif self.pause_cursor == 2:  # toggle SFX volume
                         self.save.sfx_volume = round((self.save.sfx_volume + 0.25) % 1.25, 2)
                         audio.set_sfx_volume(self.save.sfx_volume)
+                        persistence.save(self.save)
+                    elif self.pause_cursor == 3:  # toggle Music volume
+                        self.save.music_volume = round((self.save.music_volume + 0.25) % 1.25, 2)
+                        music.set_volume(self.save.music_volume)
                         persistence.save(self.save)
                 elif event.key in {pygame.K_ESCAPE, pygame.K_p}:
                     self.state = GameState.PLAYING
@@ -476,6 +490,7 @@ class Game:
                 if w.player.state is PlayerState.DEAD and w.player.state_timer <= 0:
                     self._record_score()
                     self.state = GameState.GAME_OVER
+                    music.stop()
                 # Stage cleared?
                 if w.level.stage.boss:
                     if w.boss_defeated:
@@ -504,7 +519,7 @@ class Game:
                 _draw_world(c, self.world)
             case GameState.PAUSED if self.world is not None:
                 _draw_world(c, self.world)
-                _draw_pause(c, self.pause_cursor, self.save.sfx_volume)
+                _draw_pause(c, self.pause_cursor, self.save.sfx_volume, self.save.music_volume)
             case GameState.GAME_OVER if self.world is not None:
                 _draw_world(c, self.world)
                 _draw_game_over(c, self.world, self.blink)
