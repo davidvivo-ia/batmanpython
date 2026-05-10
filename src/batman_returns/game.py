@@ -384,6 +384,17 @@ class Game:
         if event.type == pygame.QUIT:
             persistence.save(self.save)
             return False
+        # Translate joystick into keyboard-equivalents
+        if event.type == pygame.JOYBUTTONDOWN:
+            event = _pad_to_key(event)
+            if event is None:
+                return True
+        elif event.type == pygame.JOYDEVICEADDED:
+            try:
+                pygame.joystick.Joystick(event.device_index).init()
+            except (pygame.error, AttributeError):
+                pass
+            return True
         if event.type != pygame.KEYDOWN:
             return True
 
@@ -516,7 +527,9 @@ class Game:
             for ev in pygame.event.get():
                 if not self.handle_event(ev):
                     running = False
-            keys = pygame.key.get_pressed()
+            extra: dict[int, bool] = {}
+            _sample_pad_held(extra)
+            keys = _AugmentedKeys(pygame.key.get_pressed(), extra)
             self.update(keys)
             self.draw()
             self.clock.tick(FPS)
@@ -527,13 +540,83 @@ class Game:
 # ----------------------------------------------------------------------
 
 
+_PAD_TO_KEY: dict[int, int] = {
+    0: pygame.K_SPACE,   # A → jump
+    1: pygame.K_c,       # B → batarang
+    2: pygame.K_z,       # X → punch
+    3: pygame.K_x,       # Y → kick
+    4: pygame.K_DOWN,    # LB → slide
+    5: pygame.K_DOWN,    # RB → slide
+    7: pygame.K_p,       # Start → pause
+    9: pygame.K_p,
+    6: pygame.K_ESCAPE,  # Back / Select
+}
+
+
+def _pad_to_key(event: pygame.event.Event) -> pygame.event.Event | None:
+    key = _PAD_TO_KEY.get(event.button)
+    if key is None:
+        return None
+    return pygame.event.Event(pygame.KEYDOWN, {"key": key})
+
+
+def _sample_pad_held(keys_dict: dict[int, bool]) -> None:
+    """Treat analog stick / dpad as virtual key holds for movement."""
+    for i in range(pygame.joystick.get_count()):
+        try:
+            j = pygame.joystick.Joystick(i)
+            if not j.get_init():
+                j.init()
+            if j.get_numaxes() >= 2:
+                ax = j.get_axis(0)
+                ay = j.get_axis(1)
+                if ax < -0.4:
+                    keys_dict[pygame.K_LEFT] = True
+                if ax > 0.4:
+                    keys_dict[pygame.K_RIGHT] = True
+                if ay < -0.4:
+                    keys_dict[pygame.K_UP] = True
+                if ay > 0.4:
+                    keys_dict[pygame.K_DOWN] = True
+            if j.get_numhats() >= 1:
+                hx, hy = j.get_hat(0)
+                if hx < 0:
+                    keys_dict[pygame.K_LEFT] = True
+                if hx > 0:
+                    keys_dict[pygame.K_RIGHT] = True
+                if hy > 0:
+                    keys_dict[pygame.K_UP] = True
+                if hy < 0:
+                    keys_dict[pygame.K_DOWN] = True
+        except pygame.error:
+            pass
+
+
+class _AugmentedKeys:
+    """Wraps pygame.key.get_pressed() with extra virtual-press flags from gamepad."""
+    __slots__ = ("_real", "_extra")
+
+    def __init__(self, real: pygame.key.ScancodeWrapper, extra: dict[int, bool]):
+        self._real = real
+        self._extra = extra
+
+    def __getitem__(self, key: int) -> bool:
+        return bool(self._real[key]) or bool(self._extra.get(key))
+
+
 def create_game() -> Game:
     audio.init()
     pygame.init()
+    pygame.joystick.init()
     pygame.display.set_caption("Batman Returns — Python Homage")
     screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
     canvas = pygame.Surface((NATIVE_W, NATIVE_H))
     clock = pygame.time.Clock()
+    for i in range(pygame.joystick.get_count()):
+        try:
+            pygame.joystick.Joystick(i).init()
+        except pygame.error:
+            pass
     # Warm sprite cache so first frame isn't slow
     for name in sprites.SPRITE_REGISTRY:
         sprites.get(name)
