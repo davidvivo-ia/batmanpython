@@ -30,6 +30,7 @@ from .constants import (
     GameState,
     PlayerState,
 )
+from .effects import FloatingTextSystem, HitFreeze, ParticleSystem, ScreenShake
 from .entities import (
     Batarang,
     Enemy,
@@ -54,6 +55,10 @@ class World:
     boss_spawned: bool = False
     boss_defeated: bool = False
     rng: random.Random = field(default_factory=lambda: random.Random(1337))
+    particles: ParticleSystem = field(default_factory=ParticleSystem)
+    shake: ScreenShake = field(default_factory=ScreenShake)
+    freeze: HitFreeze = field(default_factory=HitFreeze)
+    floats: FloatingTextSystem = field(default_factory=FloatingTextSystem)
 
 
 def _spawn_for_stage(world: World) -> None:
@@ -93,9 +98,20 @@ def _spawn_for_stage(world: World) -> None:
         audio.boss_roar().play()
 
 
+def _award(world: World, points: int, x: float, y: float) -> None:
+    world.player.add_score(points)
+    world.floats.emit(f"+{points}", x, y - 8)
+
+
 def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
+    if world.freeze.tick():
+        return
     p = world.player
+    was_on_ground = p.on_ground
     p.update(keys, world.level)
+    # Landing dust
+    if not was_on_ground and p.on_ground:
+        world.particles.dust(p.x, p.y + p.H)
 
     # Camera follows player
     target_cam = p.x - NATIVE_W // 2
@@ -126,8 +142,16 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
         for e in world.enemies:
             if e.alive and atk.intersects(e.hitbox):
                 kb = 4.0 * p.facing
-                if e.take_damage(dmg, knockback=kb):
-                    p.add_score(SCORE_BOSS if e.boss else SCORE_ENEMY if e.kind != EnemyKind.JACKBOX else SCORE_SMALL)
+                cx, cy = e.x, e.y + e.H / 2
+                world.particles.burst_hit(cx, cy)
+                world.shake.kick(2.5)
+                killed = e.take_damage(dmg, knockback=kb)
+                if killed:
+                    pts = e.score_value
+                    _award(world, pts, e.x, e.y)
+                    world.particles.burst_blood(cx, cy, dir_sign=p.facing)
+                    world.shake.kick(5.0)
+                    world.freeze.kick(3 if not e.boss else 8)
                     if e.boss:
                         world.boss_defeated = True
 
@@ -137,8 +161,14 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
             continue
         for e in world.enemies:
             if e.alive and b.hitbox.intersects(e.hitbox):
-                if e.take_damage(b.damage, knockback=2.0 * (1 if b.vx > 0 else -1)):
-                    p.add_score(SCORE_BOSS if e.boss else SCORE_ENEMY)
+                cx, cy = e.x, e.y + e.H / 2
+                world.particles.spark(cx, cy, PALETTE["white"])
+                killed = e.take_damage(b.damage, knockback=2.0 * (1 if b.vx > 0 else -1))
+                if killed:
+                    _award(world, e.score_value, e.x, e.y)
+                    world.particles.burst_blood(cx, cy, dir_sign=1 if b.vx > 0 else -1)
+                    world.shake.kick(4.0)
+                    world.freeze.kick(3 if not e.boss else 8)
                     if e.boss:
                         world.boss_defeated = True
                 b.alive = False
@@ -146,20 +176,31 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
 
     # Enemies vs player (contact + projectiles)
     for e in world.enemies:
-        if e.alive and e.hitbox.intersects(p.hitbox):
+        if e.alive and e.hitbox.intersects(p.hitbox) and p.iframes <= 0:
             p.take_damage(e.contact_damage)
+            world.particles.burst_blood(p.x, p.y + 8, dir_sign=-p.facing)
+            world.shake.kick(4.0)
     for s in world.enemy_shots:
         if s.alive and s.hitbox.intersects(p.hitbox):
+            world.particles.spark(p.x, p.y + 10, PALETTE["red"])
+            if p.iframes <= 0:
+                world.shake.kick(3.0)
             p.take_damage(s.damage)
             s.alive = False
 
     # Pickups
     for pk in world.pickups:
         if pk.alive and pk.hitbox.intersects(p.hitbox):
+            world.particles.emit(pk.x, pk.y, count=10, color=PALETTE["green"], speed=2.0, life=18)
+            label = {"health": "HEALTH", "batarang": "+3 BAT", "1up": "1UP"}[pk.kind]
+            world.floats.emit(label, pk.x, pk.y, PALETTE["green"])
             pk.apply(p)
 
+    # FX update
+    world.particles.update()
+    world.floats.update()
+
     # Cleanup
-    world.enemies = [e for e in world.enemies if e.alive or e.iframes > 0]
     world.enemies = [e for e in world.enemies if e.alive]
     world.batarangs = [b for b in world.batarangs if b.alive]
     world.enemy_shots = [s for s in world.enemy_shots if s.alive]
@@ -177,6 +218,8 @@ def _draw_world(surf: pygame.Surface, world: World) -> None:
     for b in world.batarangs:
         b.draw(surf, world.level)
     world.player.draw(surf, world.level)
+    world.particles.draw(surf, world.level.cam_x)
+    world.floats.draw(surf, world.level.cam_x)
     draw_hud(surf, world.player, world.level.stage.name)
 
 
@@ -352,8 +395,13 @@ class Game:
                 _draw_world(c, self.world)
                 _draw_victory(c, self.world, self.blink)
 
+        # Apply screen shake during gameplay (post-draw)
+        ox, oy = (0, 0)
+        if self.state is GameState.PLAYING and self.world is not None:
+            ox, oy = self.world.shake.update()
         scaled = pygame.transform.scale(c, (WINDOW_W, WINDOW_H))
-        self.screen.blit(scaled, (0, 0))
+        self.screen.fill((0, 0, 0))
+        self.screen.blit(scaled, (ox * 3, oy * 3))
         pygame.display.flip()
 
     def run(self) -> None:
