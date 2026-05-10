@@ -140,8 +140,7 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
     for e in world.enemies:
         if not e.alive:
             continue
-        proj = e.update(p, world.level)
-        if proj is not None:
+        for proj in e.update(p, world.level):
             world.enemy_shots.append(proj)
 
     # Update projectiles

@@ -434,6 +434,8 @@ class Enemy:
     W: int = 14
     H: int = 24
     boss: bool = False
+    phase: int = 1
+    phase_timer: int = 0
 
     @classmethod
     def spawn(cls, kind: EnemyKind, x: float, y: float) -> Enemy:
@@ -473,7 +475,7 @@ class Enemy:
         return Hitbox(self.x - self.W / 2, self.y, self.W, self.H)
 
     # ------------------------------------------------------------------
-    def update(self, player: Player, level: Level) -> EnemyProjectile | None:
+    def update(self, player: Player, level: Level) -> list[EnemyProjectile]:
         if self.iframes:
             self.iframes -= 1
         if self.state_timer > 0:
@@ -483,19 +485,22 @@ class Enemy:
 
         match self.kind:
             case EnemyKind.BASHER:
-                return self._update_basher(player)
+                proj = self._update_basher(player)
             case EnemyKind.JACKBOX:
-                return self._update_jack(player)
+                proj = self._update_jack(player)
             case EnemyKind.FIREBREATHER:
-                return self._update_fire(player)
+                proj = self._update_fire(player)
             case EnemyKind.KNIFER:
-                return self._update_knifer(player)
+                proj = self._update_knifer(player)
             case EnemyKind.MIDBOSS_JOKER:
-                return self._update_joker(player, level)
+                return self._update_joker_multi(player, level)
             case EnemyKind.MIDBOSS_CATWOMAN:
-                return self._update_catwoman(player, level)
+                proj = self._update_catwoman(player, level)
             case EnemyKind.BOSS_PENGUIN:
-                return self._update_boss(player, level)
+                return self._update_boss_multi(player, level)
+            case _:
+                proj = None
+        return [proj] if proj is not None else []
 
     def _walk_toward(self, player: Player, speed: float = 1.1) -> None:
         if player.x < self.x:
@@ -642,21 +647,90 @@ class Enemy:
         return None
 
     def _update_boss(self, player: Player, level: Level) -> EnemyProjectile | None:
-        # Penguin paces left-right and lobs knives
-        self.walk_anim += 0.05
-        self.vx = math.sin(self.walk_anim) * 1.2
+        """Penguin: 3 phases.
+        - Phase 1 (>66% HP): paces, lobs single umbrellas (slow arc).
+        - Phase 2 (33-66%):  faster pacing, double-shot umbrellas + dive.
+        - Phase 3 (<33%):    angry — triple spread + faster cadence.
+        """
+        # Phase transitions
+        ratio = self.hp / self.max_hp
+        new_phase = 3 if ratio < 0.33 else 2 if ratio < 0.66 else 1
+        if new_phase != self.phase:
+            self.phase = new_phase
+            self.phase_timer = 30
+            audio.boss_roar().play()
+            self.attack_cooldown = 30  # brief recovery
+        if self.phase_timer > 0:
+            self.phase_timer -= 1
+
+        speed_scale = {1: 1.0, 2: 1.5, 3: 2.0}[self.phase]
+        self.walk_anim += 0.05 * speed_scale
+        self.vx = math.sin(self.walk_anim) * 1.2 * speed_scale
         self.x += self.vx
         self.facing = Facing.LEFT if player.x < self.x else Facing.RIGHT
         self.x = max(level.cam_x + 40, min(self.x, level.cam_x + 280))
+
+        # Occasional dive in phase 2/3 (jumps into the air for shadow scare)
+        if self.phase >= 2 and self.on_ground and self.attack_cooldown == 12:
+            self.vy = -5.5
+            self.on_ground = False
+        if not self.on_ground:
+            self.vy += 0.4
+            self.y += self.vy
+            if self.y >= GROUND_Y - self.H:
+                self.y = GROUND_Y - self.H
+                self.vy = 0
+                self.on_ground = True
+
         if self.attack_cooldown <= 0:
-            self.attack_cooldown = 50
-            return EnemyProjectile(
+            cadence = {1: 60, 2: 42, 3: 28}[self.phase]
+            self.attack_cooldown = cadence
+            sign = 1 if player.x > self.x else -1
+            base = EnemyProjectile(
                 x=self.x, y=self.y + 6,
-                vx=2.6 * (1 if player.x > self.x else -1),
-                vy=-2.0,
+                vx=2.6 * sign, vy=-2.0,
                 sprite="knife_proj", damage=14, life=140,
             )
+            return base
         return None
+
+    def _update_boss_multi(self, player: Player, level: Level) -> list[EnemyProjectile]:
+        base = self._update_boss(player, level)
+        if base is None:
+            return []
+        out = [base]
+        # Phase 2: add a second shot with different arc
+        if self.phase >= 2:
+            out.append(EnemyProjectile(
+                x=base.x, y=base.y,
+                vx=base.vx * 1.2, vy=base.vy + 1.0,
+                sprite="knife_proj", damage=14, life=140,
+            ))
+        # Phase 3: triple spread
+        if self.phase >= 3:
+            out.append(EnemyProjectile(
+                x=base.x, y=base.y,
+                vx=base.vx * 0.6, vy=base.vy - 1.5,
+                sprite="knife_proj", damage=14, life=140,
+            ))
+        return out
+
+    def _update_joker_multi(self, player: Player, level: Level) -> list[EnemyProjectile]:
+        base = self._update_joker(player, level)
+        if base is None:
+            return []
+        # Joker always throws a fan of three cards
+        return [
+            base,
+            EnemyProjectile(
+                x=base.x, y=base.y, vx=base.vx, vy=base.vy + 1.5,
+                sprite="knife_proj", damage=12, life=120,
+            ),
+            EnemyProjectile(
+                x=base.x, y=base.y, vx=base.vx, vy=base.vy - 1.0,
+                sprite="knife_proj", damage=12, life=120,
+            ),
+        ]
 
     # ------------------------------------------------------------------
     def take_damage(self, dmg: int, knockback: float = 0) -> bool:
@@ -718,6 +792,10 @@ class Enemy:
         ratio = max(0.0, self.hp / self.max_hp)
         pygame.draw.rect(surf, PALETTE["red"], (bar_x, bar_y, int(bar_w * ratio), 4))
         pygame.draw.rect(surf, PALETTE["white"], (bar_x, bar_y, bar_w, 4), 1)
+        # Phase markers at 33%/66%
+        for marker in (0.33, 0.66):
+            mx = bar_x + int(bar_w * marker)
+            pygame.draw.line(surf, PALETTE["yellow"], (mx, bar_y), (mx, bar_y + 4))
 
 
 # ----------------------------------------------------------------------
