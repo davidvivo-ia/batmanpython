@@ -54,6 +54,8 @@ class World:
     spawn_index: int = 0          # how many tile-columns have been spawned
     boss_spawned: bool = False
     boss_defeated: bool = False
+    midboss_spawned: bool = False
+    midboss_defeated: bool = False
     rng: random.Random = field(default_factory=lambda: random.Random(1337))
     particles: ParticleSystem = field(default_factory=ParticleSystem)
     shake: ScreenShake = field(default_factory=ScreenShake)
@@ -96,6 +98,21 @@ def _spawn_for_stage(world: World) -> None:
         world.enemies.append(Enemy.spawn(EnemyKind.BOSS_PENGUIN, boss_x, GROUND_Y - 32))
         world.boss_spawned = True
         audio.boss_roar().play()
+        world.floats.emit("THE PENGUIN!", world.player.x, world.player.y - 30, PALETTE["red"])
+
+    # Midboss spawn
+    if (
+        stage.midboss_kind
+        and not world.midboss_spawned
+        and world.player.x > stage.midboss_at_tile * TILE_SIZE
+    ):
+        kind = EnemyKind(stage.midboss_kind)
+        boss_x = world.player.x + 100
+        world.enemies.append(Enemy.spawn(kind, boss_x, GROUND_Y - 28))
+        world.midboss_spawned = True
+        audio.boss_roar().play()
+        label = {"midboss_joker": "THE JOKER!", "midboss_catwoman": "CATWOMAN!"}[stage.midboss_kind]
+        world.floats.emit(label, world.player.x, world.player.y - 30, PALETTE["magenta"])
 
 
 def _award(world: World, points: int, x: float, y: float) -> None:
@@ -154,8 +171,10 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
                     world.particles.burst_blood(cx, cy, dir_sign=p.facing)
                     world.shake.kick(5.0)
                     world.freeze.kick(3 if not e.boss else 8)
-                    if e.boss:
+                    if e.kind is EnemyKind.BOSS_PENGUIN:
                         world.boss_defeated = True
+                    elif e.kind in {EnemyKind.MIDBOSS_JOKER, EnemyKind.MIDBOSS_CATWOMAN}:
+                        world.midboss_defeated = True
         if any_hit:
             p.register_combo_hit()
             if p.combo >= 3:
@@ -175,8 +194,10 @@ def _update_world(world: World, keys: pygame.key.ScancodeWrapper) -> None:
                     world.particles.burst_blood(cx, cy, dir_sign=1 if b.vx > 0 else -1)
                     world.shake.kick(4.0)
                     world.freeze.kick(3 if not e.boss else 8)
-                    if e.boss:
+                    if e.kind is EnemyKind.BOSS_PENGUIN:
                         world.boss_defeated = True
+                    elif e.kind in {EnemyKind.MIDBOSS_JOKER, EnemyKind.MIDBOSS_CATWOMAN}:
+                        world.midboss_defeated = True
                 b.alive = False
                 break
 

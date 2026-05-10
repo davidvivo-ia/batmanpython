@@ -42,8 +42,11 @@ from .constants import (
     SLIDE_DAMAGE,
     SLIDE_FRAMES,
     SLIDE_SPEED,
+    NATIVE_W,
     WALK_SPEED,
 )
+
+NATIVE_W_FOR_BOSS = NATIVE_W
 
 if TYPE_CHECKING:
     from .level import Level
@@ -446,6 +449,18 @@ class Enemy:
                 return cls(kind, x, y, hp=60, max_hp=60, contact_damage=14)
             case EnemyKind.KNIFER:
                 return cls(kind, x, y, hp=35, max_hp=35, contact_damage=8)
+            case EnemyKind.MIDBOSS_JOKER:
+                return cls(
+                    kind, x, GROUND_Y - 28, hp=180, max_hp=180,
+                    W=20, H=28, contact_damage=15,
+                    score_value=SCORE_MIDBOSS, boss=True,
+                )
+            case EnemyKind.MIDBOSS_CATWOMAN:
+                return cls(
+                    kind, x, GROUND_Y - 28, hp=200, max_hp=200,
+                    W=16, H=28, contact_damage=14,
+                    score_value=SCORE_MIDBOSS, boss=True,
+                )
             case EnemyKind.BOSS_PENGUIN:
                 return cls(
                     kind, x, GROUND_Y - 32, hp=400, max_hp=400, W=24, H=32,
@@ -475,6 +490,10 @@ class Enemy:
                 return self._update_fire(player)
             case EnemyKind.KNIFER:
                 return self._update_knifer(player)
+            case EnemyKind.MIDBOSS_JOKER:
+                return self._update_joker(player, level)
+            case EnemyKind.MIDBOSS_CATWOMAN:
+                return self._update_catwoman(player, level)
             case EnemyKind.BOSS_PENGUIN:
                 return self._update_boss(player, level)
 
@@ -558,6 +577,70 @@ class Enemy:
                 )
         return None
 
+    def _update_joker(self, player: Player, level: Level) -> EnemyProjectile | None:
+        # Cackles, hops between two firing positions, throws fan of cards
+        self.walk_anim += 0.06
+        # Hop pattern
+        if self.on_ground and self.attack_cooldown > 30 and self.state_timer == 0:
+            # initiate small hop sometimes
+            if int(self.attack_cooldown) % 35 == 0:
+                self.vy = -4.5
+                self.on_ground = False
+        # Gravity for boss
+        if not self.on_ground:
+            self.vy += 0.45
+            self.y += self.vy
+            if self.y >= GROUND_Y - self.H:
+                self.y = GROUND_Y - self.H
+                self.vy = 0
+                self.on_ground = True
+        self.facing = Facing.LEFT if player.x < self.x else Facing.RIGHT
+        # Stay near arena center
+        self.x += (level.cam_x + 200 - self.x) * 0.005
+        if self.attack_cooldown <= 0:
+            self.attack_cooldown = 75
+            # Triple-card spread
+            return EnemyProjectile(
+                x=self.x, y=self.y + 8,
+                vx=2.4 * self.facing, vy=-1.8,
+                sprite="knife_proj", damage=12, life=120,
+            )
+        return None
+
+    def _update_catwoman(self, player: Player, level: Level) -> EnemyProjectile | None:
+        # Acrobatic: lunges horizontally, claws on contact, occasionally jumps over
+        dx = player.x - self.x
+        self.facing = Facing.LEFT if dx < 0 else Facing.RIGHT
+        # Lunge state pattern
+        if self.state_timer == 0 and self.attack_cooldown <= 0:
+            # Decide: jump-over or lunge
+            if abs(dx) < 40 and self.on_ground:
+                self.vy = -7.5
+                self.vx = 3.0 * (1 if dx > 0 else -1)
+                self.on_ground = False
+                self.attack_cooldown = 90
+                self.state_timer = 30
+            elif abs(dx) < 90 and self.on_ground:
+                self.vx = 2.6 * (1 if dx > 0 else -1)
+                self.attack_cooldown = 60
+                self.state_timer = 18
+        # Apply velocity & gravity
+        if not self.on_ground:
+            self.vy += 0.45
+            self.y += self.vy
+        self.x += self.vx
+        if self.state_timer == 0 and self.on_ground:
+            self.vx *= 0.6
+        if self.y >= GROUND_Y - self.H:
+            self.y = GROUND_Y - self.H
+            self.vy = 0
+            self.on_ground = True
+        # Stay in arena
+        left = level.cam_x + 30
+        right = level.cam_x + NATIVE_W_FOR_BOSS - self.W - 30
+        self.x = max(left, min(self.x, right))
+        return None
+
     def _update_boss(self, player: Player, level: Level) -> EnemyProjectile | None:
         # Penguin paces left-right and lobs knives
         self.walk_anim += 0.05
@@ -619,6 +702,10 @@ class Enemy:
                 return "firebreather"
             case EnemyKind.KNIFER:
                 return "knifer"
+            case EnemyKind.MIDBOSS_JOKER:
+                return "joker"
+            case EnemyKind.MIDBOSS_CATWOMAN:
+                return "catwoman"
             case EnemyKind.BOSS_PENGUIN:
                 return "penguin"
 

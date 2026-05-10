@@ -35,6 +35,8 @@ class Stage:
     snow: bool = False
     enemy_density: float = 0.10  # spawn probability per tile column
     boss: bool = False           # last stage spawns Penguin
+    midboss_kind: str | None = None
+    midboss_at_tile: int = 0
 
 
 STAGES: Final = (
@@ -45,6 +47,8 @@ STAGES: Final = (
         sky_top=(20, 8, 40),
         sky_bot=(80, 30, 100),
         enemy_density=0.10,
+        midboss_kind="midboss_joker",
+        midboss_at_tile=120,
     ),
     Stage(
         name="ICE PLAZA",
@@ -54,6 +58,8 @@ STAGES: Final = (
         sky_bot=(140, 160, 200),
         snow=True,
         enemy_density=0.13,
+        midboss_kind="midboss_catwoman",
+        midboss_at_tile=140,
     ),
     Stage(
         name="PENGUIN'S LAIR",

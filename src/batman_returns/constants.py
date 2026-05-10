@@ -107,6 +107,8 @@ class EnemyKind(StrEnum):
     JACKBOX = auto()        # JACKNBOX.68K — pop-up surprise
     FIREBREATHER = auto()   # FIRETRUC.68K + MINIFIRE.68K
     KNIFER = auto()         # disc/knife thrower
+    MIDBOSS_JOKER = auto()  # stage 1 midboss
+    MIDBOSS_CATWOMAN = auto()  # stage 2 midboss
     BOSS_PENGUIN = auto()   # VILLAN.68K final boss
 
 
